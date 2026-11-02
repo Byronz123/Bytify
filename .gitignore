@@ -1,0 +1,11 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+
+# Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
+keystore/
+keystore.properties

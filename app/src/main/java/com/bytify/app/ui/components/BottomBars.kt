@@ -2,11 +2,8 @@ package com.bytify.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Home
@@ -29,32 +28,63 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
+import com.bytify.app.ui.theme.BytifyColors
+import com.bytify.app.ui.theme.cel
+import com.bytify.app.ui.theme.topShine
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 
-/** Mini player melayang berbentuk kartu dengan warna dari cover. */
+/** Tombol putar khas Bytify: lingkaran gold bergaris tebal dengan kilau. */
+@Composable
+fun GoldPlayButton(
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    onClick: () -> Unit,
+    size: Dp = 44.dp,
+    shadow: Dp = 3.dp,
+) {
+    Box(
+        Modifier
+            .size(size)
+            .cel(BytifyColors.Gold, CircleShape, stroke = 2.dp, shadow = shadow)
+            .topShine()
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isBuffering) {
+            CircularProgressIndicator(Modifier.size(size * 0.45f), color = BytifyColors.Navy, strokeWidth = 2.5.dp)
+        } else {
+            Icon(
+                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                if (isPlaying) "Jeda" else "Putar",
+                tint = BytifyColors.Navy,
+                modifier = Modifier.size(size * 0.55f),
+            )
+        }
+    }
+}
+
+/** Mini player: kartu cel melayang, sedikit diwarnai dari cover. */
 @Composable
 fun MiniPlayer(modifier: Modifier = Modifier) {
     val app = appState()
@@ -62,26 +92,25 @@ fun MiniPlayer(modifier: Modifier = Modifier) {
     val likedIds by app.container.library.likedIds.collectAsState(initial = emptySet())
     val scope = rememberCoroutineScope()
     val song = state.song ?: return
-    val tint = rememberDominantColor(song.thumbnailUrl, MaterialTheme.colorScheme.surfaceContainerHigh)
-    val background by animateColorAsState(
-        tint.copy(alpha = 1f).compositeOver(MaterialTheme.colorScheme.surfaceContainerHigh, 0.35f),
-        label = "miniBg",
-    )
+    val surface = MaterialTheme.colorScheme.surfaceContainerLow
+    val tint = rememberDominantColor(song.thumbnailUrl, surface)
+    val fill by animateColorAsState(lerp(surface, tint, 0.18f), label = "miniFill")
     val liked = song.id in likedIds
 
-    Surface(
-        modifier = modifier
+    Box(
+        modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+            .padding(start = 12.dp, end = 16.dp)
+            .cel(fill, RoundedCornerShape(20.dp))
             .clickable { app.playerExpanded = true },
-        color = background,
-        shape = RoundedCornerShape(20.dp),
     ) {
         Column {
             Row(Modifier.padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(song.thumbnailUrl, Modifier.size(48.dp), RoundedCornerShape(12.dp))
+                Artwork(
+                    song.thumbnailUrl,
+                    Modifier.size(48.dp).cel(shape = RoundedCornerShape(12.dp), stroke = 1.5.dp, shadow = 0.dp),
+                    RoundedCornerShape(12.dp),
+                )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(song.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -97,33 +126,16 @@ fun MiniPlayer(modifier: Modifier = Modifier) {
                     Icon(
                         if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         if (liked) "Hapus dari favorit" else "Sukai",
-                        tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        tint = if (liked) BytifyColors.Gold else MaterialTheme.colorScheme.onSurface,
                     )
                 }
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .clickable { app.player.togglePlay() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (state.isBuffering) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            if (state.isPlaying) "Jeda" else "Putar",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    }
-                }
+                GoldPlayButton(state.isPlaying, state.isBuffering, onClick = { app.player.togglePlay() }, shadow = 2.dp)
                 IconButton(onClick = { app.player.next() }) {
                     Icon(Icons.Rounded.SkipNext, "Berikutnya")
                 }
             }
             MiniProgress(state.durationMs)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -135,21 +147,14 @@ private fun MiniProgress(durationMs: Long) {
     val progress = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     LinearProgressIndicator(
         progress = { progress },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(3.dp).clip(CircleShape),
-        color = MaterialTheme.colorScheme.primary,
-        trackColor = Color.White.copy(alpha = 0.12f),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(4.dp).clip(CircleShape),
+        color = BytifyColors.Gold,
+        trackColor = MaterialTheme.colorScheme.outlineVariant,
         strokeCap = StrokeCap.Round,
         gapSize = 0.dp,
         drawStopIndicator = {},
     )
 }
-
-private fun Color.compositeOver(base: Color, alpha: Float): Color = Color(
-    red = red * alpha + base.red * (1 - alpha),
-    green = green * alpha + base.green * (1 - alpha),
-    blue = blue * alpha + base.blue * (1 - alpha),
-    alpha = 1f,
-)
 
 private data class NavItem(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
@@ -159,16 +164,13 @@ private val navItems = listOf(
     NavItem(Routes.LIBRARY, "Koleksi", Icons.Outlined.LibraryMusic, Icons.Rounded.LibraryMusic),
 )
 
-/** Navigasi bawah berbentuk pill melayang; tab aktif melebar dengan label. */
+/** Navigasi bawah: pill cel melayang; tab aktif berupa kapsul gold bergaris. */
 @Composable
 fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier
-            .padding(horizontal = 24.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f),
-        shadowElevation = 8.dp,
+    Box(
+        modifier
+            .padding(start = 24.dp, end = 28.dp)
+            .cel(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(8.dp),
@@ -177,30 +179,23 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
         ) {
             navItems.forEach { item ->
                 val selected = currentRoute == item.route
-                val bg by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    label = "navBg",
-                )
-                val iconAlpha by animateFloatAsState(if (selected) 1f else 0.7f, label = "navAlpha")
+                val content = if (selected) BytifyColors.Navy else MaterialTheme.colorScheme.onSurfaceVariant
                 Row(
                     Modifier
-                        .clip(CircleShape)
-                        .background(bg)
+                        .then(
+                            if (selected) Modifier.cel(BytifyColors.Gold, CircleShape, stroke = 1.5.dp, shadow = 0.dp)
+                            else Modifier.clip(CircleShape),
+                        )
                         .clickable { onSelect(item.route) }
-                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                        .padding(horizontal = 18.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        if (selected) item.selectedIcon else item.icon,
-                        item.label,
-                        tint = (if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                            .copy(alpha = iconAlpha),
-                    )
+                    Icon(if (selected) item.selectedIcon else item.icon, item.label, tint = content)
                     AnimatedVisibility(selected, enter = expandHorizontally(), exit = shrinkHorizontally()) {
                         Text(
                             item.label,
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = content,
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }

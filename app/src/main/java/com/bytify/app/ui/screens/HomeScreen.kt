@@ -1,5 +1,7 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.theme.BytifyColors
+import com.bytify.app.ui.theme.cel
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -202,14 +204,14 @@ fun HomeScreen() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(Moods) { (label, query) ->
-                        AssistChip(
-                            onClick = { app.navigate(Routes.collection("mood:$label|$query")) },
-                            label = { Text(label, style = MaterialTheme.typography.labelLarge) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = AssistChipDefaults.assistChipColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ),
-                            border = null,
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier
+                                .padding(end = 3.dp, bottom = 3.dp)
+                                .cel(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp), shadow = 3.dp)
+                                .clickable { app.navigate(Routes.collection("mood:$label|$query")) }
+                                .padding(horizontal = 16.dp, vertical = 9.dp),
                         )
                     }
                 }
@@ -274,14 +276,15 @@ private fun QuickPick(song: Song, isCurrent: Boolean, onClick: () -> Unit, modif
     Surface(
         modifier = modifier
             .height(64.dp)
-            .border(
-                1.dp,
-                if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+            .padding(end = 3.dp, bottom = 3.dp)
+            .cel(
+                if (isCurrent) BytifyColors.GoldLight else MaterialTheme.colorScheme.surfaceContainerLow,
                 RoundedCornerShape(14.dp),
+                shadow = 3.dp,
             )
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = androidx.compose.ui.graphics.Color.Transparent,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Artwork(song.thumbnailUrl, Modifier.size(64.dp), RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
@@ -291,7 +294,7 @@ private fun QuickPick(song: Song, isCurrent: Boolean, onClick: () -> Unit, modif
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (isCurrent) BytifyColors.Navy else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(end = 10.dp),
             )
         }

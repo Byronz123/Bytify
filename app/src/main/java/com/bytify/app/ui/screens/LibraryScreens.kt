@@ -1,5 +1,10 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.BorderStroke
+import com.bytify.app.ui.theme.LocalCel
+import com.bytify.app.ui.theme.gloss
+import com.bytify.app.ui.theme.cel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -141,10 +146,10 @@ fun LibraryScreen() {
                             Box(
                                 Modifier
                                     .size(64.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Brush.linearGradient(listOf(BytifyColors.Green, Color(0xFF0B4F2A)))),
+                                    .cel(BytifyColors.Gold, RoundedCornerShape(12.dp), shadow = 3.dp)
+                                    .gloss(0.3f),
                                 contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Rounded.Favorite, null, tint = Color.White) }
+                            ) { Icon(Icons.Rounded.Favorite, null, tint = BytifyColors.Navy) }
                         },
                     )
                 }
@@ -393,7 +398,12 @@ private fun SongListPage(
                 actions()
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                CollageArtwork(songs.orEmpty().take(12).map { it.thumbnailUrl }, size = 220.dp, shape = RoundedCornerShape(20.dp))
+                CollageArtwork(
+                    songs.orEmpty().take(12).map { it.thumbnailUrl },
+                    size = 220.dp,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.cel(shape = RoundedCornerShape(20.dp), stroke = 2.5.dp, shadow = 6.dp),
+                )
                 Spacer(Modifier.height(18.dp))
                 Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
                 Text(
@@ -407,6 +417,8 @@ private fun SongListPage(
                         onClick = { app.play(songs.orEmpty()) },
                         enabled = !songs.isNullOrEmpty(),
                         shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = BytifyColors.Gold, contentColor = BytifyColors.Navy),
+                        border = BorderStroke(2.dp, LocalCel.current.line),
                     ) {
                         Icon(Icons.Rounded.PlayArrow, null)
                         Spacer(Modifier.width(6.dp))
@@ -422,6 +434,7 @@ private fun SongListPage(
                         },
                         enabled = !songs.isNullOrEmpty() && !allDownloaded,
                         shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(2.dp, LocalCel.current.line),
                     ) {
                         Icon(
                             if (allDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
@@ -432,6 +445,7 @@ private fun SongListPage(
                         onClick = { app.player.playShuffled(songs.orEmpty()) },
                         enabled = !songs.isNullOrEmpty(),
                         shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(2.dp, LocalCel.current.line),
                     ) {
                         Icon(Icons.Rounded.Shuffle, null)
                         Spacer(Modifier.width(6.dp))

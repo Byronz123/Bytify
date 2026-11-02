@@ -1,5 +1,11 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalView
+import android.app.Activity
+import com.bytify.app.ui.theme.cel
+import com.bytify.app.ui.components.GoldPlayButton
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -119,6 +125,16 @@ fun PlayerScreen(onCollapse: () -> Unit) {
 
     BackHandler(onBack = onCollapse)
 
+    // Latar player gelap: ikon status bar terang selama player terbuka.
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        val window = (view.context as Activity).window
+        val controller = WindowCompat.getInsetsController(window, view)
+        val previous = controller.isAppearanceLightStatusBars
+        controller.isAppearanceLightStatusBars = false
+        onDispose { controller.isAppearanceLightStatusBars = previous }
+    }
+
     if (song == null) {
         LaunchedEffect(Unit) { onCollapse() }
         return
@@ -227,21 +243,13 @@ fun PlayerScreen(onCollapse: () -> Unit) {
                 IconButton(onClick = { app.player.previous() }, Modifier.size(56.dp)) {
                     Icon(Icons.Rounded.SkipPrevious, "Sebelumnya", Modifier.size(40.dp))
                 }
-                Box(
-                    Modifier.size(76.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).clickable { app.player.togglePlay() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (state.isBuffering) {
-                        CircularProgressIndicator(Modifier.size(32.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 3.dp)
-                    } else {
-                        Icon(
-                            if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            if (state.isPlaying) "Jeda" else "Putar",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(40.dp),
-                        )
-                    }
-                }
+                GoldPlayButton(
+                    isPlaying = state.isPlaying,
+                    isBuffering = state.isBuffering,
+                    onClick = { app.player.togglePlay() },
+                    size = 76.dp,
+                    shadow = 5.dp,
+                )
                 IconButton(onClick = { app.player.next() }, Modifier.size(56.dp)) {
                     Icon(Icons.Rounded.SkipNext, "Berikutnya", Modifier.size(40.dp))
                 }
@@ -282,8 +290,9 @@ private fun SwipeableCover(song: Song, onNext: () -> Unit, onPrevious: () -> Uni
         Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .padding(vertical = 8.dp)
+            .padding(top = 8.dp, bottom = 14.dp, end = 6.dp)
             .graphicsOffset(offset)
+            .cel(shape = RoundedCornerShape(24.dp), stroke = 2.5.dp, shadow = 6.dp)
             .pointerInput(song.id) {
                 detectHorizontalDragGestures(
                     onDragEnd = {

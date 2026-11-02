@@ -1,5 +1,6 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.theme.cel
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -148,9 +149,12 @@ fun AlarmScreen() {
         items(alarms, key = { it.id }) { alarm ->
             Row(
                 Modifier
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(start = 16.dp, end = 20.dp, top = 6.dp, bottom = 10.dp)
                     .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+                    .cel(
+                        if (alarm.enabled) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        RoundedCornerShape(20.dp),
+                    )
                     .clickable { editing = alarm }
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,

@@ -22,7 +22,7 @@ data class EqualizerSettings(
 )
 
 data class Settings(
-    val pureBlack: Boolean = false,
+    val darkTheme: Boolean = false,
     val skipSilence: Boolean = false,
     val autoRadio: Boolean = true,
     val highQuality: Boolean = true,
@@ -39,7 +39,7 @@ data class Settings(
 class SettingsRepository(private val context: Context) {
 
     private object Keys {
-        val pureBlack = booleanPreferencesKey("pure_black")
+        val darkTheme = booleanPreferencesKey("dark_theme")
         val skipSilence = booleanPreferencesKey("skip_silence")
         val autoRadio = booleanPreferencesKey("auto_radio")
         val highQuality = booleanPreferencesKey("high_quality")
@@ -59,7 +59,7 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<Settings> = context.dataStore.data.map { it.toSettings() }
 
     private fun Preferences.toSettings() = Settings(
-        pureBlack = this[Keys.pureBlack] ?: false,
+        darkTheme = this[Keys.darkTheme] ?: false,
         skipSilence = this[Keys.skipSilence] ?: false,
         autoRadio = this[Keys.autoRadio] ?: true,
         highQuality = this[Keys.highQuality] ?: true,
@@ -78,7 +78,7 @@ class SettingsRepository(private val context: Context) {
         searchHistory = this[Keys.searchHistory]?.split('\n')?.filter { it.isNotBlank() }.orEmpty(),
     )
 
-    suspend fun setPureBlack(value: Boolean) = context.dataStore.edit { it[Keys.pureBlack] = value }
+    suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[Keys.darkTheme] = value }
     suspend fun setSkipSilence(value: Boolean) = context.dataStore.edit { it[Keys.skipSilence] = value }
     suspend fun setAutoRadio(value: Boolean) = context.dataStore.edit { it[Keys.autoRadio] = value }
     suspend fun setHighQuality(value: Boolean) = context.dataStore.edit { it[Keys.highQuality] = value }

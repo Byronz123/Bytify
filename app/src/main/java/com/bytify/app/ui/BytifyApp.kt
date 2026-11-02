@@ -1,5 +1,8 @@
 package com.bytify.app.ui
 
+import androidx.compose.material3.LocalContentColor
+import com.bytify.app.ui.theme.BytifyTheme
+import com.bytify.app.ui.theme.PaperBackground
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -75,7 +78,7 @@ fun BytifyApp(container: AppContainer) {
     val bottomInset = (if (hasSong) 84.dp else 0.dp) + (if (isTab) 76.dp else 0.dp) + 24.dp
 
     CompositionLocalProvider(LocalAppState provides app, LocalBottomInset provides bottomInset) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { Box(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PaperBackground(MaterialTheme.colorScheme.background, Modifier.fillMaxSize()) {
             NavHost(navController, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize()) {
                 composable(Routes.HOME) { HomeScreen() }
                 composable(Routes.SEARCH) { SearchScreen() }
@@ -122,7 +125,12 @@ fun BytifyApp(container: AppContainer) {
                 enter = slideInVertically { it },
                 exit = slideOutVertically { it },
             ) {
-                PlayerScreen(onCollapse = { app.playerExpanded = false })
+                // Player selalu bernuansa malam (navy) agar imersif di kedua mode.
+                BytifyTheme(darkTheme = true) {
+                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                        PlayerScreen(onCollapse = { app.playerExpanded = false })
+                    }
+                }
             }
 
             SongMenuHost()

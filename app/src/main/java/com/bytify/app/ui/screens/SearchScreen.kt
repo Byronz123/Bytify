@@ -1,5 +1,9 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.ui.graphics.luminance
+import com.bytify.app.ui.theme.BytifyColors
+import com.bytify.app.ui.theme.gloss
+import com.bytify.app.ui.theme.cel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,9 +64,10 @@ import com.bytify.app.ui.components.SongRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Nada-nada yang serasi dengan palet navy · beige · gold. */
 private val moodColors = listOf(
-    0xFF1F7A4D, 0xFF3B4FA0, 0xFFD2662B, 0xFF6A3D8F, 0xFF2A6F86,
-    0xFFB43F5E, 0xFF8A6A1F, 0xFF9C2F8C, 0xFF52703A, 0xFF1D5E5A,
+    0xFF1F2A44, 0xFFC6A75E, 0xFFA8643A, 0xFF4F6B5E, 0xFF6B4E71,
+    0xFF3F5A7A, 0xFF9A7E3F, 0xFF8C4F5C, 0xFF5E6E45, 0xFF2E3B5C,
 )
 
 private sealed interface SearchResult {
@@ -208,12 +213,18 @@ private fun SearchHome(
             Box(
                 Modifier
                     .aspectRatio(1.8f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(moodColors[i % moodColors.size]))
+                    .padding(end = 4.dp, bottom = 4.dp)
+                    .cel(Color(moodColors[i % moodColors.size]), RoundedCornerShape(16.dp))
+                    .gloss(0.18f)
                     .clickable { onMood(mood.first, mood.second) }
                     .padding(14.dp),
             ) {
-                Text(mood.first, style = MaterialTheme.typography.titleLarge, color = Color.White)
+                val tone = Color(moodColors[i % moodColors.size])
+                Text(
+                    mood.first,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (tone.luminance() > 0.4f) BytifyColors.Navy else BytifyColors.Cream,
+                )
             }
         }
     }

@@ -60,9 +60,9 @@ class BytifyWidget : GlanceAppWidget() {
     }
 }
 
-private val Background = Color(0xFF121714)
+private val Background = Color(0xFF1F2A44)
 private val White = ColorProvider(Color.White)
-private val Muted = ColorProvider(Color(0xFFA2ADA6))
+private val Muted = ColorProvider(Color(0xFFE8DCC8))
 
 @Composable
 private fun WidgetContent(now: NowPlaying) {
@@ -77,7 +77,7 @@ private fun WidgetContent(now: NowPlaying) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val art = now.artwork
-        Box(GlanceModifier.size(48.dp).cornerRadius(12.dp).background(Color(0xFF1F2621)), contentAlignment = Alignment.Center) {
+        Box(GlanceModifier.size(48.dp).cornerRadius(12.dp).background(Color(0xFF2E3B5C)), contentAlignment = Alignment.Center) {
             if (art != null) {
                 Image(ImageProvider(art), null, GlanceModifier.size(48.dp).cornerRadius(12.dp), contentScale = ContentScale.Crop)
             } else {
@@ -104,7 +104,7 @@ private fun WidgetContent(now: NowPlaying) {
                 GlanceModifier.size(36.dp).padding(6.dp).clickable(actionRunCallback<PreviousAction>()),
             )
             Box(
-                GlanceModifier.size(40.dp).cornerRadius(20.dp).background(Color(0xFF1ED760))
+                GlanceModifier.size(40.dp).cornerRadius(20.dp).background(Color(0xFFC6A75E))
                     .clickable(actionRunCallback<TogglePlayAction>()),
                 contentAlignment = Alignment.Center,
             ) {

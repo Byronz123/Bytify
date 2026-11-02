@@ -1,5 +1,7 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.theme.gloss
+import com.bytify.app.ui.theme.cel
 import android.content.Intent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -100,25 +102,24 @@ fun StatsScreen() {
             }
             Row(
                 Modifier
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(start = 16.dp, end = 20.dp, top = 8.dp, bottom = 12.dp)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .cel(BytifyColors.GoldLight, RoundedCornerShape(20.dp))
+                    .gloss(0.25f)
                     .clickable { app.navigate(Routes.RECAP) }
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+                    Modifier.size(52.dp).cel(BytifyColors.Navy, CircleShape, shadow = 0.dp),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.AutoGraph, null, tint = MaterialTheme.colorScheme.onPrimary) }
+                ) { Icon(Icons.Rounded.AutoGraph, null, tint = BytifyColors.Gold) }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Recap ${currentYear()} kamu", style = MaterialTheme.typography.titleMedium)
-                    Text("Lagu, artis & menit terbanyakmu", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Recap ${currentYear()} kamu", style = MaterialTheme.typography.titleMedium, color = BytifyColors.Navy)
+                    Text("Lagu, artis & menit terbanyakmu", style = MaterialTheme.typography.bodyMedium, color = BytifyColors.Navy.copy(alpha = 0.75f))
                 }
-                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null)
+                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, tint = BytifyColors.Navy)
             }
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(periods) { index, (label, _) ->
@@ -254,13 +255,13 @@ fun RecapScreen() {
         { RecapOutro(year, minutes, topSongs, topArtists) },
     )
     val gradients = listOf(
-        listOf(Color(0xFF0B3D22), Color(0xFF050806)),
-        listOf(BytifyColors.Green, Color(0xFF064421)),
-        listOf(Color(0xFF263B8A), Color(0xFF0A0F24)),
-        listOf(Color(0xFF7A2E5E), Color(0xFF1A0914)),
-        listOf(Color(0xFFB7591F), Color(0xFF2A1205)),
-        listOf(Color(0xFF1F6F78), Color(0xFF061A1C)),
-        listOf(Color(0xFF0B3D22), Color(0xFF050806)),
+        listOf(BytifyColors.NavySoft, BytifyColors.NavyDeep),
+        listOf(BytifyColors.GoldDeep, BytifyColors.Navy),
+        listOf(Color(0xFF3F5A7A), BytifyColors.NavyDeep),
+        listOf(Color(0xFF6B4E71), BytifyColors.NavyDeep),
+        listOf(Color(0xFFA8643A), BytifyColors.NavyDeep),
+        listOf(Color(0xFF4F6B5E), BytifyColors.NavyDeep),
+        listOf(BytifyColors.NavySoft, BytifyColors.NavyDeep),
     )
 
     var index by rememberSaveable { mutableIntStateOf(0) }
@@ -309,7 +310,7 @@ fun RecapScreen() {
 private fun RecapIntro(year: Int) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("Recap", style = MaterialTheme.typography.displaySmall, color = Color.White)
-        Text("$year", fontSize = 88.sp, style = MaterialTheme.typography.displaySmall, color = BytifyColors.Green)
+        Text("$year", fontSize = 88.sp, style = MaterialTheme.typography.displaySmall, color = BytifyColors.Gold)
         Spacer(Modifier.height(12.dp))
         Text("Setahun bersama musikmu di Bytify.", color = Color.White.copy(alpha = 0.8f), textAlign = TextAlign.Center)
     }
@@ -334,7 +335,7 @@ private fun RecapHero(label: String, title: String, subtitle: String, image: Str
         Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(subtitle, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.8f), textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text(caption, style = MaterialTheme.typography.labelLarge, color = BytifyColors.Green)
+        Text(caption, style = MaterialTheme.typography.labelLarge, color = BytifyColors.Gold)
     }
 }
 
@@ -345,7 +346,7 @@ private fun RecapList(title: String, rows: List<Triple<String, String, String?>>
         Spacer(Modifier.height(20.dp))
         rows.forEachIndexed { i, (name, sub, image) ->
             Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${i + 1}", style = MaterialTheme.typography.headlineSmall, color = BytifyColors.Green, modifier = Modifier.width(36.dp))
+                Text("${i + 1}", style = MaterialTheme.typography.headlineSmall, color = BytifyColors.Gold, modifier = Modifier.width(36.dp))
                 Artwork(image, Modifier.size(56.dp), if (circle) CircleShape else RoundedCornerShape(10.dp))
                 Spacer(Modifier.width(14.dp))
                 Column {

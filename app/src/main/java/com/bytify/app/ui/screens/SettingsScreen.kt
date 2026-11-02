@@ -1,5 +1,6 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.theme.cel
 import androidx.annotation.OptIn
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,8 +132,8 @@ fun SettingsScreen() {
                     }
                 }
                 Divider()
-                SwitchRow(Icons.Outlined.Contrast, "Hitam pekat", "Latar hitam murni, hemat baterai di layar AMOLED", settings.pureBlack) {
-                    scope.launch { c.settings.setPureBlack(it) }
+                SwitchRow(Icons.Outlined.Contrast, "Mode malam", "Latar navy yang lembut di mata untuk malam hari", settings.darkTheme) {
+                    scope.launch { c.settings.setDarkTheme(it) }
                 }
             }
         }
@@ -242,9 +243,9 @@ private fun Group(title: String, content: @Composable () -> Unit) {
     )
     Column(
         Modifier
-            .padding(horizontal = 16.dp)
+            .padding(start = 16.dp, end = 20.dp)
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp)),
+            .cel(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(20.dp)),
     ) { content() }
 }
 

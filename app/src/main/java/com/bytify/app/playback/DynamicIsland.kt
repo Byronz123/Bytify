@@ -238,14 +238,14 @@ private fun IslandPill(
                         Icon(Icons.Rounded.SkipPrevious, "Sebelumnya", tint = Color.White)
                     }
                     Box(
-                        Modifier.size(40.dp).clip(CircleShape).background(BytifyColors.Green)
+                        Modifier.size(40.dp).clip(CircleShape).background(BytifyColors.Gold)
                             .clickable(onClick = controls::togglePlay),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             if (now.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             if (now.isPlaying) "Jeda" else "Putar",
-                            tint = BytifyColors.OnGreen,
+                            tint = BytifyColors.OnGold,
                         )
                     }
                     IconButton(onClick = controls::next) {
@@ -272,7 +272,7 @@ private fun Cover(now: NowPlaying, sizeDp: Int, rounded: Boolean = false) {
         Box(
             Modifier.size(sizeDp.dp).clip(shape).background(Color(0xFF1F2621)),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Rounded.MusicNote, null, tint = BytifyColors.Green, modifier = Modifier.size((sizeDp / 2).dp)) }
+        ) { Icon(Icons.Rounded.MusicNote, null, tint = BytifyColors.Gold, modifier = Modifier.size((sizeDp / 2).dp)) }
     }
 }
 
@@ -292,7 +292,7 @@ private fun EqualizerBars(playing: Boolean) {
     Row(Modifier.height(18.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
         heights.forEach { h ->
             Box(
-                Modifier.width(3.dp).fillMaxHeight(h).clip(RoundedCornerShape(2.dp)).background(BytifyColors.Green),
+                Modifier.width(3.dp).fillMaxHeight(h).clip(RoundedCornerShape(2.dp)).background(BytifyColors.Gold),
             )
         }
     }

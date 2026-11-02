@@ -76,9 +76,9 @@ object ShareCard {
 
         // Latar: warna dominan cover → hitam.
         val tint = cover?.let { Palette.from(it).generate().let { p -> p.darkVibrantSwatch ?: p.dominantSwatch }?.rgb }
-            ?: 0xFF113D24.toInt()
+            ?: 0xFF1F2A44.toInt()
         canvas.drawPaint(Paint().apply {
-            shader = LinearGradient(0f, 0f, 0f, H.toFloat(), tint, 0xFF0C100E.toInt(), Shader.TileMode.CLAMP)
+            shader = LinearGradient(0f, 0f, 0f, H.toFloat(), tint, 0xFF141C2F.toInt(), Shader.TileMode.CLAMP)
         })
 
         val lyricsMode = lines.isNotEmpty()
@@ -146,7 +146,7 @@ object ShareCard {
 
     /** Penanda "Bytify" + bar equalizer hijau di pojok bawah. */
     private fun drawBrand(canvas: Canvas, typeface: Typeface) {
-        val green = 0xFF1ED760.toInt()
+        val green = 0xFFC6A75E.toInt()
         val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = green }
         val baseY = H - PAD
         listOf(0.5f, 1f, 0.75f, 0.4f).forEachIndexed { i, h ->

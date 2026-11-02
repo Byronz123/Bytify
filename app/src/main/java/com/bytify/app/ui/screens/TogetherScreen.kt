@@ -1,5 +1,8 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.theme.BytifyColors
+import com.bytify.app.ui.theme.topShine
+import com.bytify.app.ui.theme.cel
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -96,9 +99,9 @@ fun TogetherScreen() {
         item {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(88.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                    Modifier.size(88.dp).cel(BytifyColors.Gold, CircleShape).topShine(),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Outlined.Groups, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp)) }
+                ) { Icon(Icons.Outlined.Groups, null, tint = BytifyColors.Navy, modifier = Modifier.size(44.dp)) }
                 Spacer(Modifier.height(14.dp))
                 Text("Dengar Bareng", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(6.dp))
@@ -302,8 +305,8 @@ private fun Card(content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(20.dp))
+            .padding(end = 4.dp, bottom = 4.dp)
+            .cel(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(20.dp))
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) { content() }

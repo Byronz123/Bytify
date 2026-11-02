@@ -1,5 +1,8 @@
 package com.bytify.app.ui.components
 
+import com.bytify.app.ui.theme.BytifyColors
+import com.bytify.app.ui.theme.brushUnderline
+import com.bytify.app.ui.theme.cel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,15 +61,19 @@ fun SongRow(
             )
         }
         Box(Modifier.size(52.dp)) {
-            Artwork(song.thumbnailUrl, Modifier.fillMaxSize(), RoundedCornerShape(8.dp))
+            Artwork(
+                song.thumbnailUrl,
+                Modifier.fillMaxSize().cel(shape = RoundedCornerShape(10.dp), stroke = 1.5.dp, shadow = 0.dp),
+                RoundedCornerShape(10.dp),
+            )
             if (isCurrent) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(8.dp)),
+                        .background(BytifyColors.Navy.copy(alpha = 0.55f), RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Rounded.GraphicEq, null, tint = colors.primary)
+                    Icon(Icons.Rounded.GraphicEq, null, tint = BytifyColors.Gold)
                 }
             }
         }
@@ -105,10 +112,10 @@ fun SongCard(
 ) {
     Column(
         modifier
-            .width(148.dp)
+            .width(152.dp)
             .clickable(onClick = onClick),
     ) {
-        Artwork(song.thumbnailUrl, Modifier.size(148.dp), RoundedCornerShape(12.dp))
+        Artwork(song.thumbnailUrl, Modifier.size(148.dp).cel(shape = RoundedCornerShape(14.dp)), RoundedCornerShape(14.dp))
         Spacer(Modifier.height(8.dp))
         Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
@@ -134,7 +141,9 @@ fun SectionHeader(
             .padding(start = 16.dp, end = 8.dp, top = 24.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+        Box(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.brushUnderline())
+        }
         action?.invoke()
     }
 }

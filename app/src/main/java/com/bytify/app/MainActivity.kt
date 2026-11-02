@@ -8,7 +8,9 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.core.view.WindowCompat
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import com.bytify.app.data.prefs.Settings
@@ -45,7 +47,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by container.settings.settings.collectAsState(initial = Settings())
-            BytifyTheme(pureBlack = settings.pureBlack) {
+            // Ikon status bar gelap di mode terang (kertas beige), terang di mode malam.
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !settings.darkTheme
+            }
+            BytifyTheme(darkTheme = settings.darkTheme) {
                 BytifyApp(container)
             }
         }

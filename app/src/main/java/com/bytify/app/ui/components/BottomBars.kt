@@ -1,5 +1,6 @@
 package com.bytify.app.ui.components
 
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
@@ -201,6 +202,9 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
 
     // Geser jari di sepanjang navigasi: kapsul ikut jari, tab berpindah saat
     // jari melewati tab lain, dan kapsul kembali rapi saat dilepas.
+    // pointerInput(Unit) hanya dibuat sekali; pakai nilai terbaru, bukan yang lama.
+    val route by rememberUpdatedState(currentRoute)
+    val select by rememberUpdatedState(onSelect)
     var dragX by remember { mutableStateOf<Float?>(null) }
     var rowWidth by remember { mutableFloatStateOf(0f) }
     fun nearest(x: Float): String? = navItems.minByOrNull { item ->
@@ -226,7 +230,7 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
                         change.consume()
                         val x = ((dragX ?: change.position.x) + amount).coerceIn(0f, rowWidth)
                         dragX = x
-                        nearest(x)?.let { if (it != currentRoute) onSelect(it) }
+                        nearest(x)?.let { if (it != route) select(it) }
                     }
                 },
         ) {

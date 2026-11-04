@@ -135,6 +135,14 @@ class PlayerConnection(
         c.play()
     }
 
+    /** Hentikan lagu & kosongkan antrean (mini player ditutup). */
+    fun stopAndClear() {
+        controller?.let {
+            it.stop()
+            it.clearMediaItems()
+        }
+    }
+
     fun pause() {
         controller?.pause()
     }

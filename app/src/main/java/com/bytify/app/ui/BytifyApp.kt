@@ -1,5 +1,18 @@
 package com.bytify.app.ui
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.LocalContentColor
 import com.bytify.app.ui.theme.BytifyTheme
 import com.bytify.app.ui.theme.PaperBackground
@@ -58,7 +71,46 @@ import com.bytify.app.ui.screens.TogetherScreen
 @Composable
 fun BytifyApp(container: AppContainer) {
     val navController = rememberNavController()
-    val app = remember { AppState(container, navController) }
+    val scope = rememberCoroutineScope()
+    val app = remember { AppState(container, navController, scope) }
+    val sheet = app.playerSheet
+
+    // Tarik mini player ke bawah: geser keluar layar lalu hentikan lagu.
+    val dismiss = remember { Animatable(0f) }
+    val dismissPx = with(LocalDensity.current) { 72.dp.toPx() }
+    // Arah tarikan diputuskan sekali di awal tarikan dan dicatat langsung
+    // (bukan di coroutine), agar tidak salah membaca nilai yang belum diperbarui.
+    var miniMode by remember { mutableIntStateOf(MINI_IDLE) }
+    var dismissOffset by remember { mutableFloatStateOf(0f) }
+    fun dragMini(delta: Float) {
+        if (miniMode == MINI_IDLE) miniMode = if (delta > 0f) MINI_DISMISS else MINI_SHEET
+        if (miniMode == MINI_DISMISS) {
+            dismissOffset = (dismissOffset + delta).coerceAtLeast(0f)
+            val value = dismissOffset
+            scope.launch { dismiss.snapTo(value) }
+        } else {
+            sheet.dragBy(delta)
+        }
+    }
+    fun releaseMini(velocity: Float) {
+        val mode = miniMode
+        val offset = dismissOffset
+        miniMode = MINI_IDLE
+        dismissOffset = 0f
+        if (mode != MINI_DISMISS) {
+            sheet.release(velocity)
+            return
+        }
+        scope.launch {
+            if (offset > dismissPx || velocity > 1_200f) {
+                dismiss.animateTo(dismissPx * 4, tween(180))
+                container.player.stopAndClear()
+                dismiss.snapTo(0f)
+            } else {
+                dismiss.animateTo(0f, spring(dampingRatio = 0.7f))
+            }
+        }
+    }
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val playerState by container.player.state.collectAsState()
@@ -74,11 +126,14 @@ fun BytifyApp(container: AppContainer) {
         }
     }
 
+    // Lagu berhenti total: tutup player tanpa animasi.
+    LaunchedEffect(hasSong) { if (!hasSong) sheet.snapClosed() }
+
     // Tinggi area bawah yang tertutup elemen melayang, untuk padding konten.
     val bottomInset = (if (hasSong) 84.dp else 0.dp) + (if (isTab) 76.dp else 0.dp) + 24.dp
 
     CompositionLocalProvider(LocalAppState provides app, LocalBottomInset provides bottomInset) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PaperBackground(MaterialTheme.colorScheme.background, Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PaperBackground(MaterialTheme.colorScheme.background, Modifier.fillMaxSize().onSizeChanged { sheet.heightPx = it.height.toFloat().coerceAtLeast(1f) }) {
             NavHost(navController, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize()) {
                 composable(Routes.HOME) { HomeScreen() }
                 composable(Routes.SEARCH) { SearchScreen() }
@@ -105,11 +160,30 @@ fun BytifyApp(container: AppContainer) {
                 ) {
                     SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
                     if (hasSong) {
-                        MiniPlayer()
+                        // Mini player ikut naik & memudar saat player ditarik terbuka.
+                        // Tarikan dibaca di wadah yang diam: mini player sendiri ikut
+                        // bergerak, sehingga jarak tarik di dalamnya akan "termakan".
+                        Box(Modifier.verticalDragGesture(onDrag = ::dragMini, onRelease = ::releaseMini)) {
+                        MiniPlayer(
+                            Modifier.graphicsLayer {
+                                val p = sheet.progress.value.coerceIn(0f, 1f)
+                                val d = dismiss.value
+                                translationY = -p * size.height * 2.5f + d
+                                alpha = ((1f - p * 2.2f) * (1f - d / (dismissPx * 3f))).coerceIn(0f, 1f)
+                            },
+                        )
+                        }
                         Spacer(Modifier.height(10.dp))
                     }
                     if (isTab) {
-                        FloatingNavBar(currentRoute = route, onSelect = { target ->
+                        FloatingNavBar(
+                            modifier = Modifier.graphicsLayer {
+                                val p = sheet.progress.value.coerceIn(0f, 1f)
+                                translationY = p * size.height * 1.6f
+                                alpha = (1f - p * 1.8f).coerceIn(0f, 1f)
+                            },
+                            currentRoute = route,
+                            onSelect = { target ->
                             navController.navigate(target) {
                                 popUpTo(Routes.HOME) { saveState = true }
                                 launchSingleTop = true
@@ -120,15 +194,35 @@ fun BytifyApp(container: AppContainer) {
                 }
             }
 
-            AnimatedVisibility(
-                visible = app.playerExpanded && hasSong,
-                enter = slideInVertically { it },
-                exit = slideOutVertically { it },
-            ) {
-                // Player selalu bernuansa malam (navy) agar imersif di kedua mode.
-                BytifyTheme(darkTheme = true) {
-                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                        PlayerScreen(onCollapse = { app.playerExpanded = false })
+            val sheetShown by remember { derivedStateOf { sheet.progress.value > 0.001f } }
+            // Player disiapkan sejak ada lagu (tersembunyi di bawah layar), sehingga
+            // tarikan pertama tidak tersendat menunggu layar player disusun.
+            if (hasSong) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalDragGesture(
+                            enabled = sheetShown,
+                            onDrag = { sheet.dragBy(it) },
+                            onRelease = { sheet.release(it) },
+                        )
+                        .graphicsLayer {
+                        // Pegas bisa sedikit melampaui 0..1; batasi agar sudut tak negatif.
+                        val p = sheet.progress.value.coerceIn(0f, 1f)
+                        translationY = (1f - p) * size.height
+                        alpha = (p * 1.6f).coerceIn(0f, 1f)
+                        val s = 0.94f + 0.06f * p
+                        scaleX = s
+                        scaleY = s
+                        shape = RoundedCornerShape(((1f - p) * 32f).dp)
+                        clip = p < 1f
+                    },
+                ) {
+                    // Player selalu bernuansa malam (navy) agar imersif di kedua mode.
+                    BytifyTheme(darkTheme = true) {
+                        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                            PlayerScreen(onCollapse = sheet::collapse)
+                        }
                     }
                 }
             }
@@ -140,3 +234,7 @@ fun BytifyApp(container: AppContainer) {
         }
     }
 }
+
+private const val MINI_IDLE = 0
+private const val MINI_SHEET = 1
+private const val MINI_DISMISS = 2

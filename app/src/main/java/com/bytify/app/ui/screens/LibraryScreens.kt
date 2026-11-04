@@ -1,5 +1,9 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.BorderStroke
 import com.bytify.app.ui.theme.LocalCel
@@ -138,26 +142,28 @@ fun LibraryScreen() {
         when (tab) {
             0 -> {
                 item {
-                    LibraryEntry(
-                        title = "Lagu yang disukai",
-                        subtitle = "${liked.size} lagu",
-                        onClick = { app.navigate(Routes.collection("liked")) },
-                        art = {
-                            Box(
-                                Modifier
-                                    .size(64.dp)
-                                    .cel(BytifyColors.Gold, RoundedCornerShape(12.dp), shadow = 3.dp)
-                                    .gloss(0.3f),
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Rounded.Favorite, null, tint = BytifyColors.Navy) }
-                        },
-                    )
-                }
-                item {
-                    AutoPlaylistEntry("Paling sering minggu ini", "top:7") { app.navigate(Routes.collection("top:7")) }
-                }
-                item {
-                    AutoPlaylistEntry("Paling sering bulan ini", "top:30") { app.navigate(Routes.collection("top:30")) }
+                    // Pintasan cepat 2x2: koleksi otomatis yang paling sering dibuka.
+                    Column(
+                        Modifier.padding(start = 16.dp, end = 12.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            QuickTile(Icons.Rounded.Favorite, "Disukai", "${liked.size} lagu", BytifyColors.Gold, Modifier.weight(1f)) {
+                                app.navigate(Routes.collection("liked"))
+                            }
+                            QuickTile(Icons.Rounded.DownloadDone, "Diunduh", "${downloaded.size} lagu", BytifyColors.Navy, Modifier.weight(1f)) {
+                                app.navigate(Routes.collection("downloaded"))
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            QuickTile(Icons.Rounded.History, "Riwayat", "Baru diputar", BytifyColors.NavySoft, Modifier.weight(1f)) {
+                                app.navigate(Routes.HISTORY)
+                            }
+                            QuickTile(Icons.AutoMirrored.Rounded.TrendingUp, "Top 50 kamu", "Bulan ini", BytifyColors.GoldDeep, Modifier.weight(1f)) {
+                                app.navigate(Routes.collection("top:30"))
+                            }
+                        }
+                    }
                 }
                 items(playlists, key = { it.id }) { playlist ->
                     LibraryEntry(
@@ -219,18 +225,30 @@ fun LibraryScreen() {
     }
 }
 
+/** Ubin pintasan persegi bergaya cel: ikon besar di tengah, label di bawah. */
 @Composable
-private fun AutoPlaylistEntry(title: String, kind: String, onClick: () -> Unit) {
-    val app = appState()
-    val days = kind.removePrefix("top:").toInt()
-    val songs by remember(kind) { app.container.library.topSongs(daysAgo(days), 4) }
-        .collectAsState(initial = emptyList())
-    LibraryEntry(
-        title = title,
-        subtitle = "Playlist otomatis",
-        onClick = onClick,
-        art = { CollageArtwork(songs.map { it.song.thumbnailUrl }, size = 64.dp) },
-    )
+private fun QuickTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val onColor = if (color.luminance() > 0.4f) BytifyColors.Navy else BytifyColors.Cream
+    Column(modifier.clickable(onClick = onClick)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .padding(end = 4.dp, bottom = 4.dp)
+                .cel(color, RoundedCornerShape(20.dp))
+                .gloss(0.2f),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = onColor, modifier = Modifier.size(56.dp)) }
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable

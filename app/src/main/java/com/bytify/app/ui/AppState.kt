@@ -1,5 +1,6 @@
 package com.bytify.app.ui
 
+import kotlinx.coroutines.CoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,8 +23,10 @@ data class SongMenuRequest(
 class AppState(
     val container: AppContainer,
     val navController: NavHostController,
+    scope: CoroutineScope,
 ) {
-    var playerExpanded by mutableStateOf(false)
+    /** Player layar penuh yang bisa ditarik dari mini player. */
+    val playerSheet = PlayerSheetState(scope)
     var songMenu by mutableStateOf<SongMenuRequest?>(null)
     var addToPlaylistSong by mutableStateOf<Song?>(null)
     var message by mutableStateOf<String?>(null)

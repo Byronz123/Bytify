@@ -1,5 +1,8 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.ui.components.VolumeSlider
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.runtime.DisposableEffect
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalView
@@ -123,11 +126,13 @@ fun PlayerScreen(onCollapse: () -> Unit) {
     var sheet by remember { mutableStateOf(PlayerSheet.None) }
     val song = state.song
 
-    BackHandler(onBack = onCollapse)
+    BackHandler(enabled = app.playerSheet.isOpen, onBack = onCollapse)
 
-    // Latar player gelap: ikon status bar terang selama player terbuka.
+    // Latar player gelap: ikon status bar terang hanya selama player terbuka.
     val view = LocalView.current
-    DisposableEffect(Unit) {
+    val open = app.playerSheet.isOpen
+    DisposableEffect(open) {
+        if (!open) return@DisposableEffect onDispose { }
         val window = (view.context as Activity).window
         val controller = WindowCompat.getInsetsController(window, view)
         val previous = controller.isAppearanceLightStatusBars
@@ -162,9 +167,7 @@ fun PlayerScreen(onCollapse: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount -> if (dragAmount > 40) onCollapse() }
-            },
+
     ) {
         // Latar: cover diburamkan (Android 12+) + gradasi warna dominan.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -215,7 +218,12 @@ fun PlayerScreen(onCollapse: () -> Unit) {
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(song.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        song.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, repeatDelayMillis = 1_800, velocity = 40.dp),
+                    )
                     Text(song.artist, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { scope.launch { app.container.library.toggleLike(song, liked) } }) {
@@ -260,15 +268,25 @@ fun PlayerScreen(onCollapse: () -> Unit) {
                 ) { app.player.cycleRepeat() }
             }
 
+            VolumeSlider(Modifier.padding(top = 4.dp))
+
             val sleep by app.player.sleepTimer.collectAsState()
+            val context = LocalContext.current
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp, bottom = 10.dp, end = 4.dp)
+                    .cel(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f), RoundedCornerShape(18.dp), stroke = 1.5.dp, shadow = 3.dp)
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                ToggleIcon(Icons.Rounded.Lyrics, "Lirik", showLyrics) { showLyrics = !showLyrics }
-                ToggleIcon(Icons.Rounded.Bedtime, "Sleep timer", sleep != SleepTimer.Off) { sheet = PlayerSheet.Sleep }
-                ToggleIcon(Icons.Rounded.Speed, "Kecepatan", state.speed != 1f || state.pitch != 1f) { sheet = PlayerSheet.Speed }
-                ToggleIcon(Icons.AutoMirrored.Rounded.QueueMusic, "Antrean", false) { sheet = PlayerSheet.Queue }
+                ActionItem(Icons.Rounded.Lyrics, "LIRIK", showLyrics) { showLyrics = !showLyrics }
+                ActionItem(Icons.AutoMirrored.Rounded.QueueMusic, "ANTREAN", false) { sheet = PlayerSheet.Queue }
+                ActionItem(Icons.Rounded.Share, "BAGIKAN", false) {
+                    app.container.appScope.launch { ShareCard.share(context, song) }
+                }
+                ActionItem(Icons.Rounded.Speed, "TEMPO", state.speed != 1f || state.pitch != 1f) { sheet = PlayerSheet.Speed }
+                ActionItem(Icons.Rounded.Bedtime, "TIMER", sleep != SleepTimer.Off) { sheet = PlayerSheet.Sleep }
             }
         }
     }
@@ -482,8 +500,28 @@ private fun SeekBar(durationMs: Long, onSeek: (Long) -> Unit) {
         Row {
             Text(formatMs((fraction * durationMs).toLong()), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
-            Text(formatMs(durationMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "-" + formatMs((durationMs - (fraction * durationMs).toLong()).coerceAtLeast(0)),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+
+/** Tombol bilah aksi bawah: ikon + label kecil, menyala gold saat aktif. */
+@Composable
+private fun ActionItem(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    val color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, label, tint = color, modifier = Modifier.size(22.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = color, modifier = Modifier.padding(top = 3.dp))
     }
 }
 

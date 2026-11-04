@@ -1,5 +1,18 @@
 package com.bytify.app.ui.components
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandHorizontally
@@ -102,7 +115,7 @@ fun MiniPlayer(modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(start = 12.dp, end = 16.dp)
             .cel(fill, RoundedCornerShape(20.dp))
-            .clickable { app.playerExpanded = true },
+            .clickable { app.playerSheet.expand() },
     ) {
         Column {
             Row(Modifier.padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -164,40 +177,71 @@ private val navItems = listOf(
     NavItem(Routes.LIBRARY, "Koleksi", Icons.Outlined.LibraryMusic, Icons.Rounded.LibraryMusic),
 )
 
-/** Navigasi bawah: pill cel melayang; tab aktif berupa kapsul gold bergaris. */
+/**
+ * Navigasi bawah: pill cel melayang. Kapsul gold meluncur ke tab yang dipilih;
+ * tepi depan bergerak lebih cepat dari tepi belakang sehingga kapsul memanjang
+ * lalu menyusut seperti cairan.
+ */
 @Composable
 fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val bounds = remember { mutableStateMapOf<String, Pair<Float, Float>>() }
+    val target = bounds[currentRoute]
+    var previousLeft by remember { mutableFloatStateOf(target?.first ?: 0f) }
+    val movingRight = (target?.first ?: 0f) >= previousLeft
+    val lead = spring<Float>(dampingRatio = 0.72f, stiffness = 700f)
+    val trail = spring<Float>(dampingRatio = 0.8f, stiffness = 240f)
+    val left by animateFloatAsState(target?.first ?: 0f, if (movingRight) trail else lead, label = "navLeft")
+    val right by animateFloatAsState(target?.second ?: 0f, if (movingRight) lead else trail, label = "navRight")
+    LaunchedEffect(target?.first) { target?.first?.let { previousLeft = it } }
+
     Box(
         modifier
             .padding(start = 24.dp, end = 28.dp)
             .cel(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(8.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            navItems.forEach { item ->
-                val selected = currentRoute == item.route
-                val content = if (selected) BytifyColors.Navy else MaterialTheme.colorScheme.onSurfaceVariant
-                Row(
+        Box(Modifier.fillMaxWidth().padding(8.dp)) {
+            if (target != null && right > left) {
+                Box(
                     Modifier
-                        .then(
-                            if (selected) Modifier.cel(BytifyColors.Gold, CircleShape, stroke = 1.5.dp, shadow = 0.dp)
-                            else Modifier.clip(CircleShape),
-                        )
-                        .clickable { onSelect(item.route) }
-                        .padding(horizontal = 18.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(if (selected) item.selectedIcon else item.icon, item.label, tint = content)
-                    AnimatedVisibility(selected, enter = expandHorizontally(), exit = shrinkHorizontally()) {
-                        Text(
-                            item.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = content,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
+                        .offset { IntOffset(left.roundToInt(), 0) }
+                        .width(with(density) { (right - left).toDp() })
+                        .height(46.dp)
+                        .cel(BytifyColors.Gold, CircleShape, stroke = 1.5.dp, shadow = 0.dp)
+                        .topShine(0.22f),
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().height(46.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                navItems.forEach { item ->
+                    val selected = currentRoute == item.route
+                    val content by animateColorAsState(
+                        if (selected) BytifyColors.Navy else MaterialTheme.colorScheme.onSurfaceVariant,
+                        label = "navContent",
+                    )
+                    Row(
+                        Modifier
+                            .onGloballyPositioned { c ->
+                                val x = c.positionInParent().x
+                                bounds[item.route] = x to x + c.size.width
+                            }
+                            .clip(CircleShape)
+                            .clickable { onSelect(item.route) }
+                            .padding(horizontal = 18.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(if (selected) item.selectedIcon else item.icon, item.label, tint = content)
+                        AnimatedVisibility(selected, enter = expandHorizontally(), exit = shrinkHorizontally()) {
+                            Text(
+                                item.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = content,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
                     }
                 }
             }

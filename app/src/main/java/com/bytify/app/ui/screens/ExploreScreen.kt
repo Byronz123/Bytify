@@ -26,7 +26,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Podcasts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
@@ -83,11 +87,22 @@ fun ExploreScreen() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Text("Jelajah", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 16.dp, top = 16.dp))
-        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ExploreTab(Icons.Rounded.Podcasts, "Podcast", tab == 0) { tab = 0 }
-            ExploreTab(Icons.Rounded.Radio, "Radio", tab == 1) { tab = 1 }
+        // Satu pintu untuk konten non-musik: Film, Podcast, Radio, Live TV.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ExploreTab(Icons.Rounded.Movie, "Film", tab == 0) { tab = 0 }
+            ExploreTab(Icons.Rounded.Podcasts, "Podcast", tab == 1) { tab = 1 }
+            ExploreTab(Icons.Rounded.Radio, "Radio", tab == 2) { tab = 2 }
+            ExploreTab(Icons.Rounded.LiveTv, "Live TV", tab == 3) { tab = 3 }
         }
-        if (tab == 0) PodcastHome() else RadioHome()
+        when (tab) {
+            0 -> MoviesScreen(embedded = true)
+            1 -> PodcastHome()
+            2 -> RadioHome()
+            else -> LiveTvScreen(embedded = true)
+        }
     }
 }
 

@@ -1,6 +1,10 @@
 package com.bytify.app
 
 import com.bytify.app.data.remote.PodcastRepository
+import com.bytify.app.data.movie.MovieCatalogApi
+import com.bytify.app.data.movie.MovieRepository
+import com.bytify.app.data.live.LiveCatalogApi
+import com.bytify.app.data.live.LiveRepository
 import com.bytify.app.data.remote.RadioRepository
 import com.bytify.app.data.youtube.RoutingDataSource
 import android.content.Context
@@ -71,6 +75,10 @@ class AppContainer(context: Context) {
     val importer = ImportRepository(okHttp, json, youtube, library)
     val radio = RadioRepository(okHttp, json, database.dao())
     val podcasts = PodcastRepository(okHttp, json, database.dao())
+    val movieCatalogApi = MovieCatalogApi(okHttp, json, BuildConfig.MOVIE_CATALOG_URL)
+    val movies = MovieRepository(database.dao(), movieCatalogApi, json)
+    val liveCatalogApi = LiveCatalogApi(okHttp, json, BuildConfig.LIVE_CATALOG_URL)
+    val live = LiveRepository(database.dao(), liveCatalogApi)
     val updates = UpdateRepository(appContext, okHttp, json)
     val audioEffects = AudioEffects()
     val alarms = AlarmRepository(appContext, database.dao())

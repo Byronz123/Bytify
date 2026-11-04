@@ -56,6 +56,11 @@ val LocalBottomInset = staticCompositionLocalOf<Dp> { 0.dp }
 object Routes {
     const val HOME = "home"
     const val SEARCH = "search"
+    const val MOVIES = "movies"
+    const val LIVE = "live"
+    const val LIVE_PLAYER = "live/player/{id}"
+    const val MOVIE_DETAIL = "movie/{id}"
+    const val MOVIE_PLAYER = "movie/player/{id}?ep={ep}"
     const val LIBRARY = "library"
     const val HISTORY = "history"
     const val STATS = "stats"
@@ -72,6 +77,10 @@ object Routes {
 
     val tabs = listOf(HOME, SEARCH, EXPLORE, LIBRARY)
 
+    fun livePlayer(id: String) = "live/player/${android.net.Uri.encode(id)}"
+    fun movieDetail(id: String) = "movie/${android.net.Uri.encode(id)}"
+    fun moviePlayer(id: String, episodeId: String? = null) =
+        "movie/player/${android.net.Uri.encode(id)}" + (episodeId?.let { "?ep=${android.net.Uri.encode(it)}" } ?: "")
     fun playlist(id: Long) = "playlist/$id"
     fun podcast(id: Long) = "podcast/$id"
     fun collection(kind: String) = "collection/${android.net.Uri.encode(kind)}"

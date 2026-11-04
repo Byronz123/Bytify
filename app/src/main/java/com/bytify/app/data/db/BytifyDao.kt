@@ -161,6 +161,101 @@ interface BytifyDao {
     @Query("DELETE FROM alarms WHERE id = :id")
     suspend fun deleteAlarm(id: Long)
 
+    // ---------- Film: katalog, favorit, riwayat ----------
+    @Query("SELECT * FROM movies ORDER BY updatedAt DESC, title COLLATE NOCASE")
+    fun movies(): Flow<List<MovieEntity>>
+
+    @Query("SELECT * FROM movies WHERE id = :id LIMIT 1")
+    fun movie(id: String): Flow<MovieEntity?>
+
+    @Query(
+        """SELECT * FROM movies
+           WHERE title LIKE '%' || :query || '%' COLLATE NOCASE
+              OR overview LIKE '%' || :query || '%' COLLATE NOCASE
+              OR genresJson LIKE '%' || :query || '%' COLLATE NOCASE
+           ORDER BY title COLLATE NOCASE""",
+    )
+    fun searchMovies(query: String): Flow<List<MovieEntity>>
+
+    @Upsert
+    suspend fun upsertMovies(movies: List<MovieEntity>)
+
+    /** Hapus judul yang tidak lagi ada di katalog server, kecuali yang difavoritkan. */
+    @Query("DELETE FROM movies WHERE updatedAt < :syncedAt AND id NOT IN (SELECT movieId FROM movie_favorites)")
+    suspend fun pruneMovies(syncedAt: Long)
+
+    @Query(
+        """SELECT m.* FROM movies AS m
+           INNER JOIN movie_favorites AS f ON f.movieId = m.id
+           ORDER BY f.savedAt DESC""",
+    )
+    fun favoriteMovies(): Flow<List<MovieEntity>>
+
+    @Query("SELECT movieId FROM movie_favorites ORDER BY savedAt DESC")
+    fun movieFavoriteIds(): Flow<List<String>>
+
+    @Upsert
+    suspend fun upsertMovieFavorite(favorite: MovieFavoriteEntity)
+
+    @Query("DELETE FROM movie_favorites WHERE movieId = :movieId")
+    suspend fun deleteMovieFavorite(movieId: String)
+
+    // updatedAt menyimpan urutan dari server (lihat MovieRepository.refresh).
+    @Query("SELECT * FROM movie_sections ORDER BY updatedAt, title COLLATE NOCASE")
+    fun movieSections(): Flow<List<MovieSectionEntity>>
+
+    @Query("DELETE FROM movie_sections")
+    suspend fun clearMovieSections()
+
+    @Upsert
+    suspend fun upsertMovieSections(sections: List<MovieSectionEntity>)
+
+    @Transaction
+    suspend fun replaceMovieSections(sections: List<MovieSectionEntity>) {
+        clearMovieSections()
+        if (sections.isNotEmpty()) upsertMovieSections(sections)
+    }
+
+    @Upsert
+    suspend fun upsertMovieHistory(history: MovieHistoryEntity)
+
+    @Query("SELECT * FROM movie_history ORDER BY updatedAt DESC")
+    fun movieHistory(): Flow<List<MovieHistoryEntity>>
+
+    @Query("SELECT * FROM movie_history WHERE movieId = :movieId LIMIT 1")
+    suspend fun movieHistoryById(movieId: String): MovieHistoryEntity?
+
+    // ---------- Live TV: katalog dinamis & favorit ----------
+    @Query("SELECT * FROM live_channels ORDER BY isAvailable DESC, category COLLATE NOCASE, name COLLATE NOCASE")
+    fun liveChannels(): Flow<List<LiveChannelEntity>>
+
+    @Query("SELECT * FROM live_channels WHERE id = :id LIMIT 1")
+    fun liveChannel(id: String): Flow<LiveChannelEntity?>
+
+    @Query("SELECT * FROM live_channels WHERE isAvailable = 1 ORDER BY category COLLATE NOCASE, name COLLATE NOCASE")
+    fun availableLiveChannels(): Flow<List<LiveChannelEntity>>
+
+    @Query("SELECT channelId FROM live_favorites ORDER BY savedAt DESC")
+    fun liveFavoriteIds(): Flow<List<String>>
+
+    @Upsert
+    suspend fun upsertLiveChannels(channels: List<LiveChannelEntity>)
+
+    @Query("DELETE FROM live_channels")
+    suspend fun clearLiveChannels()
+
+    @Transaction
+    suspend fun replaceLiveChannels(channels: List<LiveChannelEntity>) {
+        clearLiveChannels()
+        if (channels.isNotEmpty()) upsertLiveChannels(channels)
+    }
+
+    @Upsert
+    suspend fun upsertLiveFavorite(favorite: LiveFavoriteEntity)
+
+    @Query("DELETE FROM live_favorites WHERE channelId = :channelId")
+    suspend fun deleteLiveFavorite(channelId: String)
+
     // ---------- Playlist ----------
     @Insert
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long

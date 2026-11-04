@@ -2,6 +2,7 @@ package com.bytify.app.data.db
 
 import com.bytify.app.data.model.MediaKind
 import androidx.room.Embedded
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -141,3 +142,78 @@ data class PlaylistSummary(
 ) {
     val thumbnailList: List<String> get() = thumbnails?.split('|')?.filter { it.isNotBlank() }.orEmpty()
 }
+
+/** Metadata film yang di-cache untuk katalog offline dan detail film. */
+@Entity(tableName = "movies")
+data class MovieEntity(
+    @PrimaryKey val id: String,
+    @ColumnInfo(defaultValue = "movie") val type: String = "movie",
+    @ColumnInfo(defaultValue = "[]") val episodesJson: String = "[]",
+    val title: String,
+    val overview: String,
+    val posterUrl: String?,
+    val backdropUrl: String?,
+    val releaseYear: Int?,
+    val durationMin: Int?,
+    val genresJson: String,
+    val rating: Double?,
+    val language: String?,
+    val videoUrl: String?,
+    val trailerUrl: String?,
+    val subtitlesJson: String,
+    val license: String?,
+    val updatedAt: Long,
+)
+
+/** Status favorit film disimpan terpisah dari favorit musik. */
+@Entity(tableName = "movie_favorites")
+data class MovieFavoriteEntity(
+    @PrimaryKey val movieId: String,
+    val savedAt: Long,
+)
+
+/** Posisi terakhir tontonan; digunakan oleh fitur lanjut menonton. */
+@Entity(tableName = "movie_history")
+data class MovieHistoryEntity(
+    @PrimaryKey val movieId: String,
+    val title: String,
+    val posterUrl: String?,
+    val positionMs: Long,
+    val durationMs: Long,
+    val updatedAt: Long,
+)
+
+/** Grup katalog dari field `sections` dalam respons JSON. */
+@Entity(tableName = "movie_sections")
+data class MovieSectionEntity(
+    @PrimaryKey val title: String,
+    val movieIdsJson: String,
+    val updatedAt: Long,
+)
+
+
+/** Kanal live TV dari katalog server; URL hanya berasal dari penyedia yang berizin. */
+@Entity(tableName = "live_channels", indices = [Index(value = ["category"]), Index(value = ["isAvailable"])])
+data class LiveChannelEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String,
+    val logoUrl: String?,
+    val category: String,
+    val country: String,
+    val language: String,
+    val streamUrl: String,
+    val streamType: String,
+    val isAvailable: Boolean,
+    val statusMessage: String?,
+    val checkedAtEpochMs: Long,
+    val license: String?,
+    val updatedAt: Long,
+)
+
+/** Favorit kanal disimpan terpisah dari favorit musik dan film. */
+@Entity(tableName = "live_favorites")
+data class LiveFavoriteEntity(
+    @PrimaryKey val channelId: String,
+    val savedAt: Long,
+)

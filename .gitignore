@@ -9,3 +9,6 @@ local.properties
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/
 keystore.properties
+
+# Private provider URLs and rights configuration for the Live TV backend
+backend/live-api/.env

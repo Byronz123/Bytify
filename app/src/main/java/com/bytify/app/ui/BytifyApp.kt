@@ -61,6 +61,11 @@ import com.bytify.app.ui.screens.ImportScreen
 import com.bytify.app.ui.screens.HistoryScreen
 import com.bytify.app.ui.screens.HomeScreen
 import com.bytify.app.ui.screens.LibraryScreen
+import com.bytify.app.ui.screens.LiveTvScreen
+import com.bytify.app.ui.screens.LivePlayerScreen
+import com.bytify.app.ui.screens.MoviesScreen
+import com.bytify.app.ui.screens.MovieDetailScreen
+import com.bytify.app.ui.screens.MoviePlayerScreen
 import com.bytify.app.ui.screens.PlayerScreen
 import com.bytify.app.ui.screens.PlaylistScreen
 import com.bytify.app.ui.screens.RecapScreen
@@ -118,6 +123,7 @@ fun BytifyApp(container: AppContainer) {
     val playerState by container.player.state.collectAsState()
     val hasSong = playerState.song != null
     val isTab = route in Routes.tabs
+    val isVideoPlayer = route == Routes.LIVE_PLAYER || route == Routes.MOVIE_PLAYER
     val isRecap = route == Routes.RECAP
     val snackbar = remember { SnackbarHostState() }
 
@@ -132,13 +138,33 @@ fun BytifyApp(container: AppContainer) {
     LaunchedEffect(hasSong) { if (!hasSong) sheet.snapClosed() }
 
     // Tinggi area bawah yang tertutup elemen melayang, untuk padding konten.
-    val bottomInset = (if (hasSong) 84.dp else 0.dp) + (if (isTab) 76.dp else 0.dp) + 24.dp
+    val bottomInset = (if (hasSong && !isVideoPlayer) 84.dp else 0.dp) + (if (isTab) 76.dp else 0.dp) + 24.dp
 
     CompositionLocalProvider(LocalAppState provides app, LocalBottomInset provides bottomInset) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PaperBackground(MaterialTheme.colorScheme.background, Modifier.fillMaxSize().onSizeChanged { sheet.heightPx = it.height.toFloat().coerceAtLeast(1f) }) {
             NavHost(navController, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize()) {
                 composable(Routes.HOME) { HomeScreen() }
                 composable(Routes.SEARCH) { SearchScreen() }
+                composable(Routes.MOVIES) { MoviesScreen() }
+                composable(Routes.LIVE) { LiveTvScreen() }
+                composable(Routes.LIVE_PLAYER, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                    LivePlayerScreen(android.net.Uri.decode(entry.arguments?.getString("id").orEmpty()))
+                }
+                composable(Routes.MOVIE_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                    MovieDetailScreen(android.net.Uri.decode(entry.arguments?.getString("id").orEmpty()))
+                }
+                composable(
+                    Routes.MOVIE_PLAYER,
+                    arguments = listOf(
+                        navArgument("id") { type = NavType.StringType },
+                        navArgument("ep") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    ),
+                ) { entry ->
+                    MoviePlayerScreen(
+                        android.net.Uri.decode(entry.arguments?.getString("id").orEmpty()),
+                        entry.arguments?.getString("ep")?.let(android.net.Uri::decode),
+                    )
+                }
                 composable(Routes.LIBRARY) { LibraryScreen() }
                 composable(Routes.HISTORY) { HistoryScreen() }
                 composable(Routes.STATS) { StatsScreen() }
@@ -165,7 +191,7 @@ fun BytifyApp(container: AppContainer) {
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp),
                 ) {
                     SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
-                    if (hasSong) {
+                    if (hasSong && !isVideoPlayer) {
                         // Mini player ikut naik & memudar saat player ditarik terbuka.
                         // Tarikan dibaca di wadah yang diam: mini player sendiri ikut
                         // bergerak, sehingga jarak tarik di dalamnya akan "termakan".

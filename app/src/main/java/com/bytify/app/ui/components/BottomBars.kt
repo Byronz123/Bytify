@@ -1,5 +1,9 @@
 package com.bytify.app.ui.components
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
@@ -195,16 +199,43 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
     val right by animateFloatAsState(target?.second ?: 0f, if (movingRight) lead else trail, label = "navRight")
     LaunchedEffect(target?.first) { target?.first?.let { previousLeft = it } }
 
+    // Geser jari di sepanjang navigasi: kapsul ikut jari, tab berpindah saat
+    // jari melewati tab lain, dan kapsul kembali rapi saat dilepas.
+    var dragX by remember { mutableStateOf<Float?>(null) }
+    var rowWidth by remember { mutableFloatStateOf(0f) }
+    fun nearest(x: Float): String? = navItems.minByOrNull { item ->
+        bounds[item.route]?.let { (l, r) -> kotlin.math.abs((l + r) / 2 - x) } ?: Float.MAX_VALUE
+    }?.route
+
     Box(
         modifier
             .padding(start = 24.dp, end = 28.dp)
             .cel(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape),
     ) {
-        Box(Modifier.fillMaxWidth().padding(8.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+                .onSizeChanged { rowWidth = it.width.toFloat() }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragX = it.x },
+                        onDragEnd = { dragX = null },
+                        onDragCancel = { dragX = null },
+                    ) { change, amount ->
+                        change.consume()
+                        val x = ((dragX ?: change.position.x) + amount).coerceIn(0f, rowWidth)
+                        dragX = x
+                        nearest(x)?.let { if (it != currentRoute) onSelect(it) }
+                    }
+                },
+        ) {
             if (target != null && right > left) {
+                val width = right - left
+                val dragLeft = dragX?.let { (it - width / 2).coerceIn(0f, (rowWidth - width).coerceAtLeast(0f)) }
                 Box(
                     Modifier
-                        .offset { IntOffset(left.roundToInt(), 0) }
+                        .offset { IntOffset((dragLeft ?: left).roundToInt(), 0) }
                         .width(with(density) { (right - left).toDp() })
                         .height(46.dp)
                         .cel(BytifyColors.Gold, CircleShape, stroke = 1.5.dp, shadow = 0.dp)

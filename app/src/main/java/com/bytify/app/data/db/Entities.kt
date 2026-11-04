@@ -1,5 +1,6 @@
 package com.bytify.app.data.db
 
+import com.bytify.app.data.model.MediaKind
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
@@ -14,8 +15,60 @@ data class SongEntity(
     val thumbnailUrl: String?,
     val durationSec: Long?,
     val likedAt: Long? = null,
+    /** Alamat audio langsung untuk episode podcast (null untuk musik). */
+    val streamUrl: String? = null,
+    /** [MediaKind] dalam bentuk teks; null = musik. */
+    val kind: String? = null,
 ) {
-    fun toSong() = Song(id, title, artist, thumbnailUrl, durationSec)
+    fun toSong() = Song(
+        id = id,
+        title = title,
+        artist = artist,
+        thumbnailUrl = thumbnailUrl,
+        durationSec = durationSec,
+        streamUrl = streamUrl,
+        kind = kind?.let { runCatching { MediaKind.valueOf(it) }.getOrNull() } ?: MediaKind.MUSIC,
+    )
+}
+
+/** Stasiun radio yang disimpan pengguna. */
+@Entity(tableName = "radio_favorites")
+data class RadioFavoriteEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val streamUrl: String,
+    val favicon: String?,
+    val tags: String,
+    val country: String,
+    val hls: Boolean,
+    val savedAt: Long = System.currentTimeMillis(),
+)
+
+/** Podcast yang diikuti. [lastOpenedAt] untuk menandai episode baru. */
+@Entity(tableName = "podcast_subscriptions")
+data class PodcastSubscriptionEntity(
+    @PrimaryKey val id: Long,
+    val title: String,
+    val author: String,
+    val artworkUrl: String?,
+    val feedUrl: String,
+    val subscribedAt: Long = System.currentTimeMillis(),
+    val lastOpenedAt: Long = System.currentTimeMillis(),
+)
+
+/** Posisi terakhir sebuah episode, agar bisa dilanjutkan. */
+@Entity(tableName = "episode_progress")
+data class EpisodeProgressEntity(
+    @PrimaryKey val episodeId: String,
+    val positionMs: Long,
+    val durationMs: Long,
+    val updatedAt: Long = System.currentTimeMillis(),
+) {
+    val finished: Boolean get() = durationMs > 0 && positionMs >= durationMs - FINISHED_MARGIN_MS
+
+    companion object {
+        const val FINISHED_MARGIN_MS = 30_000L
+    }
 }
 
 @Entity(tableName = "playlists")

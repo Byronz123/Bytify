@@ -105,7 +105,8 @@ class PlayerConnection(
         c.prepare()
         c.play()
         radioSeedId = null
-        if (radio && songs.size == 1) startRadio(songs.first())
+        // Lagu terkait YouTube hanya untuk musik, bukan radio/podcast.
+        if (radio && songs.size == 1 && songs.first().isMusic) startRadio(songs.first())
     }
 
     fun playShuffled(songs: List<Song>) {
@@ -221,7 +222,9 @@ class PlayerConnection(
         val c = controller ?: return
         if (loadingMore || c.repeatMode != Player.REPEAT_MODE_OFF) return
         if (c.currentMediaItemIndex < c.mediaItemCount - 1) return
-        val current = c.currentMediaItem?.mediaId ?: return
+        val currentItem = c.currentMediaItem ?: return
+        if (!Song.fromMediaItem(currentItem).isMusic) return
+        val current = currentItem.mediaId
         if (current.startsWith(Song.SEARCH_PREFIX)) return
         loadingMore = true
         scope.launch {

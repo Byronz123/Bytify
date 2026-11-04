@@ -32,4 +32,4 @@ fun currentYear(): Int = Calendar.getInstance().get(Calendar.YEAR)
 
 /** Link YouTube Music untuk dibagikan. */
 fun shareUrl(songId: String): String? =
-    if (songId.startsWith("search:")) null else "https://music.youtube.com/watch?v=$songId"
+    if (songId.contains(':')) null else "https://music.youtube.com/watch?v=$songId"

@@ -1,5 +1,10 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
 import com.bytify.app.ui.components.VolumeSlider
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.foundation.basicMarquee
@@ -150,7 +155,7 @@ fun PlayerScreen(onCollapse: () -> Unit) {
     val liked = song.id in likedIds
     val lyrics by produceState<LyricsState>(LyricsState.Loading, song.id) {
         value = LyricsState.Loading
-        value = runCatching { app.container.lyrics.lyricsFor(song) }
+        value = if (!song.isMusic) LyricsState.Missing else runCatching { app.container.lyrics.lyricsFor(song) }
             .fold({ if (it == null) LyricsState.Missing else LyricsState.Ready(it) }, { LyricsState.Missing })
     }
     val translateOn by app.container.settings.settings
@@ -240,7 +245,7 @@ fun PlayerScreen(onCollapse: () -> Unit) {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
             }
 
-            SeekBar(state.durationMs, onSeek = app.player::seekTo)
+            if (song.isLive) LiveBadge() else SeekBar(state.durationMs, onSeek = app.player::seekTo)
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -280,7 +285,7 @@ fun PlayerScreen(onCollapse: () -> Unit) {
                     .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                ActionItem(Icons.Rounded.Lyrics, "LIRIK", showLyrics) { showLyrics = !showLyrics }
+                if (song.isMusic) ActionItem(Icons.Rounded.Lyrics, "LIRIK", showLyrics) { showLyrics = !showLyrics }
                 ActionItem(Icons.AutoMirrored.Rounded.QueueMusic, "ANTREAN", false) { sheet = PlayerSheet.Queue }
                 ActionItem(Icons.Rounded.Share, "BAGIKAN", false) {
                     app.container.appScope.launch { ShareCard.share(context, song) }
@@ -296,6 +301,29 @@ fun PlayerScreen(onCollapse: () -> Unit) {
         PlayerSheet.Sleep -> SleepSheet { sheet = PlayerSheet.None }
         PlayerSheet.Speed -> SpeedSheet(state.speed, state.pitch) { sheet = PlayerSheet.None }
         PlayerSheet.None -> Unit
+    }
+}
+
+/** Pengganti slider untuk siaran radio: tidak ada durasi, selalu siaran langsung. */
+@Composable
+private fun LiveBadge() {
+    val pulse = rememberInfiniteTransition(label = "live")
+    val alpha by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "liveDot")
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 22.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .cel(Color(0xFFB4473A), RoundedCornerShape(50), stroke = 1.5.dp, shadow = 2.dp)
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).alpha(alpha).clip(CircleShape).background(Color.White))
+            Spacer(Modifier.width(8.dp))
+            Text("SIARAN LANGSUNG", style = MaterialTheme.typography.labelLarge, color = Color.White)
+        }
     }
 }
 

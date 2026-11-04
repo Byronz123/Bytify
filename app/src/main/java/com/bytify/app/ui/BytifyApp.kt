@@ -1,5 +1,7 @@
 package com.bytify.app.ui
 
+import com.bytify.app.ui.screens.PodcastScreen
+import com.bytify.app.ui.screens.ExploreScreen
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -146,6 +148,10 @@ fun BytifyApp(container: AppContainer) {
                 composable(Routes.IMPORT) { ImportScreen() }
                 composable(Routes.ALARMS) { AlarmScreen() }
                 composable(Routes.TOGETHER) { TogetherScreen() }
+                composable(Routes.EXPLORE) { ExploreScreen() }
+                composable(Routes.PODCAST, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
+                    PodcastScreen(it.arguments?.getLong("id") ?: 0L)
+                }
                 composable(Routes.PLAYLIST, arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                     PlaylistScreen(it.arguments?.getLong("id") ?: 0L)
                 }

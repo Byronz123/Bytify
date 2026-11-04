@@ -110,10 +110,7 @@ class LibraryCallback(
 
     private suspend fun resolve(mediaItems: List<MediaItem>): MutableList<MediaItem> = mediaItems.map { item ->
         val fromLibrary = if (item.mediaMetadata.title == null) findSong(item.mediaId)?.toMediaItem() else null
-        (fromLibrary ?: item).buildUpon()
-            .setUri(Song.uriFor(item.mediaId))
-            .setCustomCacheKey(item.mediaId)
-            .build()
+        Song.restore(fromLibrary ?: item)
     }.toMutableList()
 
     /** Dari Android Auto: memilih satu lagu memutar seluruh daftar tempat lagu itu berada. */
@@ -154,20 +151,12 @@ class LibraryCallback(
         )
         .build()
 
-    private fun Song.toBrowsableItem() = MediaItem.Builder()
-        .setMediaId(id)
-        .setUri(Song.uriFor(id))
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(title)
-                .setArtist(artist)
-                .setArtworkUri(thumbnailUrl?.let(Uri::parse))
-                .setIsBrowsable(false)
-                .setIsPlayable(true)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .build(),
-        )
-        .build()
+    private fun Song.toBrowsableItem(): MediaItem {
+        val item = toMediaItem()
+        return item.buildUpon()
+            .setMediaMetadata(item.mediaMetadata.buildUpon().setIsBrowsable(false).setIsPlayable(true).build())
+            .build()
+    }
 
     private fun <T> List<T>.page(page: Int, pageSize: Int): ImmutableList<T> {
         if (pageSize <= 0 || pageSize == Int.MAX_VALUE) return ImmutableList.copyOf(this)

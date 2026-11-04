@@ -5,6 +5,7 @@ import com.bytify.app.data.db.PlayEventEntity
 import com.bytify.app.data.db.PlaylistEntity
 import com.bytify.app.data.db.PlaylistSongEntity
 import com.bytify.app.data.db.SongEntity
+import com.bytify.app.data.model.MediaKind
 import com.bytify.app.data.model.Song
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -67,7 +68,15 @@ class LibraryRepository(private val dao: BytifyDao) {
     suspend fun removeFromPlaylist(playlistId: Long, songId: String) =
         dao.removeFromPlaylist(playlistId, songId)
 
-    private fun Song.toEntity() = SongEntity(id, title, artist, thumbnailUrl, durationSec)
+    private fun Song.toEntity() = SongEntity(
+        id = id,
+        title = title,
+        artist = artist,
+        thumbnailUrl = thumbnailUrl,
+        durationSec = durationSec,
+        streamUrl = streamUrl,
+        kind = kind.takeIf { it != MediaKind.MUSIC }?.name,
+    )
 
     companion object {
         private const val HISTORY_LIMIT = 500

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Banyak stasiun radio internet & beberapa feed podcast hanya tersedia lewat
+  HTTP biasa. Stream audio publik tidak memuat data pribadi; semua API
+  aplikasi (YouTube, Apple, Supabase, GitHub) tetap memakai HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

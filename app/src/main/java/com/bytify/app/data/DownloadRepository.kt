@@ -96,7 +96,7 @@ class DownloadRepository(
 
     fun download(song: Song) {
         scope.launch { library.saveSong(song) }
-        val request = DownloadRequest.Builder(song.id, Song.uriFor(song.id))
+        val request = DownloadRequest.Builder(song.id, song.playUri)
             .setCustomCacheKey(song.id)
             .setData(song.title.toByteArray())
             .build()

@@ -1,5 +1,6 @@
 package com.bytify.app.playback
 
+import com.bytify.app.data.model.MediaKind
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Intent
@@ -145,7 +146,10 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             while (true) {
                 delay(CHECKPOINT_MS)
-                if (player.isPlaying) saveListen()
+                if (player.isPlaying) {
+                    saveListen()
+                    saveEpisodeProgress()
+                }
             }
         }
     }
@@ -225,6 +229,14 @@ class PlaybackService : MediaLibraryService() {
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // Episode yang habis diputar sendiri ditandai selesai.
+            val previous = record?.song
+            if (previous?.kind == MediaKind.EPISODE && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                val duration = (previous.durationSec ?: 0) * 1000
+                container.appScope.launch(Dispatchers.IO) {
+                    container.podcasts.saveProgress(previous.id, duration.coerceAtLeast(1), duration.coerceAtLeast(1))
+                }
+            }
             saveListen()
             record = mediaItem?.let { ListenRecord(Song.fromMediaItem(it), System.currentTimeMillis()) }
             accumulatedMs = 0
@@ -242,6 +254,7 @@ class PlaybackService : MediaLibraryService() {
                 playingSince?.let { accumulatedMs += now - it }
                 playingSince = null
                 saveListen()
+                saveEpisodeProgress()
             }
             publishNowPlaying(loadArtwork = false)
         }
@@ -259,8 +272,9 @@ class PlaybackService : MediaLibraryService() {
     /** Siapkan URL stream lagu berikutnya agar perpindahan lagu instan. */
     private fun prefetchNext() {
         val nextIndex = player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: return
-        val nextId = player.getMediaItemAt(nextIndex).mediaId
-        if (container.downloads.isDownloaded(nextId)) return
+        val nextItem = player.getMediaItemAt(nextIndex)
+        val nextId = nextItem.mediaId
+        if (!Song.fromMediaItem(nextItem).isMusic || container.downloads.isDownloaded(nextId)) return
         container.appScope.launch(Dispatchers.IO) {
             runCatching { container.youtube.resolveStreamUrlBlocking(nextId) }
         }
@@ -291,8 +305,21 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** Catat (atau perbarui) durasi dengar sesi saat ini ke riwayat. */
+    /** Simpan posisi episode podcast agar bisa dilanjutkan nanti. */
+    private fun saveEpisodeProgress() {
+        val item = player.currentMediaItem ?: return
+        if (Song.fromMediaItem(item).kind != MediaKind.EPISODE) return
+        val position = player.currentPosition
+        val duration = player.duration.takeIf { it > 0 } ?: return
+        container.appScope.launch(Dispatchers.IO) {
+            container.podcasts.saveProgress(item.mediaId, position, duration)
+        }
+    }
+
     private fun saveListen() {
         val current = record ?: return
+        // Siaran radio tidak dihitung ke riwayat/statistik musik.
+        if (current.song.isLive) return
         val total = accumulatedMs + (playingSince?.let { System.currentTimeMillis() - it } ?: 0)
         if (total < MIN_RECORDED_MS) return
         container.appScope.launch(Dispatchers.IO) {
@@ -315,6 +342,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         saveListen()
+        saveEpisodeProgress()
         island.hide()
         container.nowPlaying.value = NowPlaying()
         container.appScope.launch { BytifyWidget.refresh(this@PlaybackService) }

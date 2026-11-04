@@ -1,5 +1,8 @@
 package com.bytify.app
 
+import com.bytify.app.data.remote.PodcastRepository
+import com.bytify.app.data.remote.RadioRepository
+import com.bytify.app.data.youtube.RoutingDataSource
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.OptIn
@@ -66,6 +69,8 @@ class AppContainer(context: Context) {
     val lyrics = LyricsRepository(okHttp, json)
     val translator = TranslateRepository(okHttp, json)
     val importer = ImportRepository(okHttp, json, youtube, library)
+    val radio = RadioRepository(okHttp, json, database.dao())
+    val podcasts = PodcastRepository(okHttp, json, database.dao())
     val updates = UpdateRepository(appContext, okHttp, json)
     val audioEffects = AudioEffects()
     val alarms = AlarmRepository(appContext, database.dao())
@@ -96,9 +101,17 @@ class AppContainer(context: Context) {
         DataSource.Factory { ChunkedDataSource(resolving.createDataSource(), ChunkedDataSource.DEFAULT_CHUNK) }
     }
 
+    /** Alamat audio langsung (radio, episode podcast): HTTP biasa, ikuti redirect. */
+    private val directDataSourceFactory: DataSource.Factory =
+        OkHttpDataSource.Factory(okHttp).setUserAgent("Bytify/${BuildConfig.VERSION_NAME} (Android)")
+
+    /** Untuk unduhan: musik lewat YouTube, episode lewat alamat langsung. */
+    private val downloadUpstreamFactory: DataSource.Factory =
+        RoutingDataSource.Factory(resolvingDataSourceFactory, directDataSourceFactory)
+
     /** Dibuat saat pertama dipakai agar pembukaan aplikasi tetap ringan. */
     val downloads by lazy {
-        DownloadRepository(appContext, mediaDatabase, resolvingDataSourceFactory, library, appScope)
+        DownloadRepository(appContext, mediaDatabase, downloadUpstreamFactory, library, appScope)
     }
 
     /**
@@ -110,10 +123,17 @@ class AppContainer(context: Context) {
             .setCache(songCache)
             .setUpstreamDataSourceFactory(resolvingDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        CacheDataSource.Factory()
+        val music = CacheDataSource.Factory()
             .setCache(downloads.cache)
             .setUpstreamDataSourceFactory(online)
             .setCacheWriteDataSinkFactory(null)
+        // Radio & episode: episode yang diunduh dibaca dari penyimpanan, sisanya
+        // langsung dari internet tanpa cache (siaran radio tidak pernah berakhir).
+        val direct = CacheDataSource.Factory()
+            .setCache(downloads.cache)
+            .setUpstreamDataSourceFactory(directDataSourceFactory)
+            .setCacheWriteDataSinkFactory(null)
+        RoutingDataSource.Factory(music, direct)
     }
 
     val player = PlayerConnection(appContext, appScope, youtube, settings)

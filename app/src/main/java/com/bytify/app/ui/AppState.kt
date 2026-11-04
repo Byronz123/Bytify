@@ -65,12 +65,15 @@ object Routes {
     const val IMPORT = "import"
     const val ALARMS = "alarms"
     const val TOGETHER = "together"
+    const val EXPLORE = "explore"
+    const val PODCAST = "podcast/{id}"
     const val PLAYLIST = "playlist/{id}"
     const val COLLECTION = "collection/{kind}"
 
-    val tabs = listOf(HOME, SEARCH, LIBRARY)
+    val tabs = listOf(HOME, SEARCH, EXPLORE, LIBRARY)
 
     fun playlist(id: Long) = "playlist/$id"
+    fun podcast(id: Long) = "podcast/$id"
     fun collection(kind: String) = "collection/${android.net.Uri.encode(kind)}"
 }
 

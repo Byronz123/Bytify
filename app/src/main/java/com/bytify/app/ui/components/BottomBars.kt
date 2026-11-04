@@ -1,5 +1,7 @@
 package com.bytify.app.ui.components
 
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.layout.onSizeChanged
@@ -179,6 +181,7 @@ private data class NavItem(val route: String, val label: String, val icon: Image
 private val navItems = listOf(
     NavItem(Routes.HOME, "Beranda", Icons.Outlined.Home, Icons.Rounded.Home),
     NavItem(Routes.SEARCH, "Cari", Icons.Rounded.Search, Icons.Rounded.Search),
+    NavItem(Routes.EXPLORE, "Jelajah", Icons.Outlined.Explore, Icons.Rounded.Explore),
     NavItem(Routes.LIBRARY, "Koleksi", Icons.Outlined.LibraryMusic, Icons.Rounded.LibraryMusic),
 )
 

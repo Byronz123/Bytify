@@ -20,15 +20,24 @@ interface BytifyDao {
     @Query(
         """UPDATE songs SET title = :title, artist = :artist,
            thumbnailUrl = COALESCE(:thumbnailUrl, thumbnailUrl),
-           durationSec = COALESCE(:durationSec, durationSec) WHERE id = :id""",
+           durationSec = COALESCE(:durationSec, durationSec),
+           streamUrl = COALESCE(:streamUrl, streamUrl), kind = COALESCE(:kind, kind) WHERE id = :id""",
     )
-    suspend fun updateSongMeta(id: String, title: String, artist: String, thumbnailUrl: String?, durationSec: Long?)
+    suspend fun updateSongMeta(
+        id: String,
+        title: String,
+        artist: String,
+        thumbnailUrl: String?,
+        durationSec: Long?,
+        streamUrl: String?,
+        kind: String?,
+    )
 
     /** Simpan metadata lagu tanpa menimpa status suka. */
     @Transaction
     suspend fun saveSong(song: SongEntity) {
         if (insertSongIfAbsent(song) == -1L) {
-            updateSongMeta(song.id, song.title, song.artist, song.thumbnailUrl, song.durationSec)
+            updateSongMeta(song.id, song.title, song.artist, song.thumbnailUrl, song.durationSec, song.streamUrl, song.kind)
         }
     }
 
@@ -103,6 +112,38 @@ interface BytifyDao {
            ORDER BY plays DESC LIMIT :limit""",
     )
     fun forgottenFavorites(before: Long, limit: Int): Flow<List<SongStat>>
+
+    // ---------- Radio ----------
+    @Query("SELECT * FROM radio_favorites ORDER BY savedAt DESC")
+    fun radioFavorites(): Flow<List<RadioFavoriteEntity>>
+
+    @Upsert
+    suspend fun upsertRadioFavorite(station: RadioFavoriteEntity)
+
+    @Query("DELETE FROM radio_favorites WHERE id = :id")
+    suspend fun deleteRadioFavorite(id: String)
+
+    // ---------- Podcast ----------
+    @Query("SELECT * FROM podcast_subscriptions ORDER BY subscribedAt DESC")
+    fun podcastSubscriptions(): Flow<List<PodcastSubscriptionEntity>>
+
+    @Upsert
+    suspend fun upsertPodcastSubscription(podcast: PodcastSubscriptionEntity)
+
+    @Query("DELETE FROM podcast_subscriptions WHERE id = :id")
+    suspend fun deletePodcastSubscription(id: Long)
+
+    @Query("UPDATE podcast_subscriptions SET lastOpenedAt = :at WHERE id = :id")
+    suspend fun markPodcastOpened(id: Long, at: Long)
+
+    @Upsert
+    suspend fun upsertEpisodeProgress(progress: EpisodeProgressEntity)
+
+    @Query("SELECT * FROM episode_progress WHERE episodeId = :id")
+    suspend fun episodeProgress(id: String): EpisodeProgressEntity?
+
+    @Query("SELECT * FROM episode_progress")
+    fun allEpisodeProgress(): Flow<List<EpisodeProgressEntity>>
 
     // ---------- Alarm ----------
     @Query("SELECT * FROM alarms ORDER BY hour, minute")

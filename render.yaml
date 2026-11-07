@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: singapore
-    branch: main  # Sesuaikan dengan nama branch utama Anda (main atau master)
+    branch: feature/complete-1.3.0
     rootDir: backend/api
     buildCommand: npm install
     startCommand: node server.mjs

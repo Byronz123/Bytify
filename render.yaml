@@ -2,10 +2,9 @@ services:
   - type: web
     name: bytify-api
     runtime: node
-    # free = tidur setelah 15 menit tanpa request; starter = menyala 24/7.
     plan: free
     region: singapore
-    branch: main  # <-- UBAH INI ke nama branch Anda (misal: main atau master)
+    branch: main  # Sesuaikan dengan nama branch utama Anda (main atau master)
     rootDir: backend/api
     buildCommand: npm install
     startCommand: node server.mjs

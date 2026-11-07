@@ -16,8 +16,8 @@ android {
         applicationId = "com.bytify.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.3.0"
 
         // Listen Together: isi supabase.url & supabase.key di local.properties.
         val local = Properties().apply {
@@ -27,6 +27,14 @@ android {
         buildConfigField("String", "SUPABASE_KEY", "\"${local.getProperty("supabase.key", "")}\"")
         // Repo GitHub sumber pembaruan (owner/nama), diatur di gradle.properties.
         buildConfigField("String", "UPDATE_REPO", "\"${project.findProperty("bytify.updateRepo") ?: ""}\"")
+        val movieCatalogUrl = local.getProperty("movie.catalog.url", project.findProperty("bytify.movieCatalogUrl")?.toString() ?: "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        buildConfigField("String", "MOVIE_CATALOG_URL", "\"$movieCatalogUrl\"")
+        val liveCatalogUrl = local.getProperty("live.catalog.url", project.findProperty("bytify.liveCatalogUrl")?.toString() ?: "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        buildConfigField("String", "LIVE_CATALOG_URL", "\"$liveCatalogUrl\"")
     }
 
     // Kunci rilis dari keystore.properties (tidak di-commit). Semua versi Bytify
@@ -101,6 +109,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("androidx.media3:media3-ui:1.9.2")
     implementation("androidx.media3:media3-session:1.9.2")
     implementation("androidx.media3:media3-exoplayer-hls:1.9.2")
     implementation("androidx.media3:media3-datasource-okhttp:1.9.2")

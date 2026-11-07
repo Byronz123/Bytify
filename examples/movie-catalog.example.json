@@ -1,0 +1,26 @@
+{
+  "movies": [
+    {
+      "id": "public-domain-example-001",
+      "title": "Contoh Film Klasik",
+      "overview": "Ganti dengan sinopsis metadata yang boleh kamu gunakan.",
+      "posterUrl": "https://cdn.example.org/poster.jpg",
+      "backdropUrl": "https://cdn.example.org/backdrop.jpg",
+      "releaseYear": 1939,
+      "durationMin": 102,
+      "genres": ["Fantasi", "Keluarga"],
+      "rating": 8.1,
+      "language": "en",
+      "videoUrl": null,
+      "trailerUrl": null,
+      "subtitles": [],
+      "license": "Verify rights before publishing"
+    }
+  ],
+  "sections": [
+    {
+      "title": "Film Klasik",
+      "movieIds": ["public-domain-example-001"]
+    }
+  ]
+}

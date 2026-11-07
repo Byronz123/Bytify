@@ -1,0 +1,12 @@
+# Salin file ini menjadi local.properties dan sesuaikan nilainya.
+sdk.dir=/path/ke/Android/Sdk
+
+# Opsional: Dengar Bareng (Supabase publishable key, bukan service-role secret).
+supabase.url=https://PROJECT_REF.supabase.co
+supabase.key=sb_publishable_REPLACE_ME
+
+# Opsional: URL HTTPS backend katalog film.
+movie.catalog.url=https://YOUR_DOMAIN/api/catalog.json
+
+# Opsional: URL HTTPS backend katalog Live TV.
+live.catalog.url=https://YOUR_DOMAIN/api/live/channels

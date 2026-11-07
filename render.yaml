@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bytify-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main  # Sesuaikan dengan nama branch utama Anda (main atau master)
+    rootDir: backend/api
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info

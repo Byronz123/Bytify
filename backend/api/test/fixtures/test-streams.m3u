@@ -1,0 +1,11 @@
+#EXTM3U
+# HANYA UNTUK PENGUJIAN. Stream contoh publik yang disediakan pengembang pemutar (Apple, Mux)
+# untuk menguji HLS. Bukan kanal TV dan bukan data produksi.
+#EXTINF:-1 tvg-id="test.apple.bipbop" tvg-country="US" group-title="Pengujian",Apple BipBop (uji HLS)
+https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/master.m3u8
+#EXTINF:-1 tvg-id="test.apple.basic" tvg-country="US" group-title="Pengujian",Apple Basic Stream (uji HLS)
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8
+#EXTINF:-1 tvg-id="test.mux.bunny" tvg-country="US" group-title="Pengujian",Mux Test Stream (uji HLS)
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="test.offline" tvg-country="ID" group-title="Pengujian",Kanal Offline (uji status)
+https://test-streams.mux.dev/does-not-exist/index.m3u8

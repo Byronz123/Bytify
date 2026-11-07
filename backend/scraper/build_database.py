@@ -109,6 +109,13 @@ def to_api_record(item):
     return max(0, before - after) if before else 0
 
 
+def needs_rescrape(item):
+    """Entri dari scraper lama yang metadatanya rusak: genre berisi menu situs, atau tanpa sinopsis & rating."""
+    genres = item.get("genres") or []
+    no_info = not (item.get("overview") or "").strip() and item.get("rating") in (None, "", "N/A")
+    return len(genres) > 8 or no_info or not item.get("videoUrl")
+
+
 def clean_existing_database(db):
     """Bersihkan junk dari seluruh database (format lama maupun baru)."""
     return sum(to_api_record(item) for item in db)
@@ -246,6 +253,8 @@ def worker_task(worker_id, url_queue):
             to_api_record(item)
 
             with db_lock:
+                # Ganti entri lama (rusak) untuk URL yang sama, bukan menambah duplikat
+                database[:] = [d for d in database if source_url_of(d) != url]
                 database.append(item)
                 existing_urls.add(url)
                 stats["success"] += 1
@@ -308,7 +317,10 @@ def build_database():
     total_to_process = len(urls)
 
     database = load_existing_database()
-    existing_urls = {source_url_of(i) for i in database if source_url_of(i)}
+    rescrape = {source_url_of(i) for i in database if source_url_of(i) and needs_rescrape(i)}
+    existing_urls = {source_url_of(i) for i in database if source_url_of(i)} - rescrape
+    if rescrape:
+        print(f"[*] {len(rescrape)} entri lama metadatanya tidak lengkap -> akan di-scrape ulang.")
     junk = clean_existing_database(database)
     if junk:
         print(f"[*] Auto-clean: {junk} URL junk dibuang dari database lama.")

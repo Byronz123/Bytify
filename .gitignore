@@ -1,6 +1,7 @@
 .gradle/
 build/
 app/build/
+backend/api/dist/
 local.properties
 .idea/
 *.iml

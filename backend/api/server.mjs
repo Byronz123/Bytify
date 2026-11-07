@@ -1,92 +1,202 @@
-import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const MOVIE_DB_PATH = path.resolve(__dirname, '../data/bytify_database.json');
+const LIVE_DB_PATH = path.resolve(__dirname, '../data/live_tv_database.json');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const DB_PATH = path.resolve(__dirname, '../data/bytify_database.json');
+function createDatabaseReader() {
+    const cache = new Map();
+    return (filePath) => {
+        const stats = fs.statSync(filePath);
+        const cached = cache.get(filePath);
+        if (cached?.mtimeMs === stats.mtimeMs) {
+            return cached.items;
+        }
 
-app.use(cors());
-app.use(express.json());
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8') || '[]');
+        if (!Array.isArray(parsed)) {
+            throw new Error(`Catalog at ${filePath} must contain a JSON array.`);
+        }
 
-function readDatabase() {
-    if (!fs.existsSync(DB_PATH)) {
-        return [];
-    }
-    const raw = fs.readFileSync(DB_PATH, 'utf-8');
-    return JSON.parse(raw || '[]');
+        cache.set(filePath, { mtimeMs: stats.mtimeMs, items: parsed });
+        return parsed;
+    };
 }
 
-// Root Endpoint (Health Check)
-app.get('/', (req, res) => {
-    res.json({
-        ok: true,
-        service: "Bytify Backend API",
-        endpoints: [
-            "/api/movies",
-            "/api/movies/search?q=judul",
-            "/api/movies/:id"
-        ]
+function firstUrl(...values) {
+    for (const value of values) {
+        const candidates = Array.isArray(value) ? value : [value];
+        const url = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+        if (url) return url.trim();
+    }
+    return null;
+}
+
+export function toMovie(item) {
+    return {
+        id: String(item.id ?? ''),
+        type: 'movie',
+        title: String(item.title ?? ''),
+        overview: String(item.overview ?? item.description ?? ''),
+        posterUrl: item.posterUrl ?? item.poster_url ?? null,
+        backdropUrl: item.backdropUrl ?? item.backdrop_url ?? null,
+        releaseYear: item.releaseYear ?? item.release_year ?? null,
+        durationMin: item.durationMin ?? item.duration_min ?? null,
+        genres: Array.isArray(item.genres) ? item.genres : [],
+        rating: item.rating ?? null,
+        language: item.language ?? null,
+        videoUrl: item.videoUrl ?? firstUrl(item.stream_urls, item.dl_urls),
+        trailerUrl: item.trailerUrl ?? item.trailer_url ?? null,
+        subtitles: Array.isArray(item.subtitles) ? item.subtitles : [],
+        license: item.license ?? null,
+        episodes: Array.isArray(item.episodes) ? item.episodes : [],
+    };
+}
+
+export function toLiveChannel(item, checkedAtEpochMs) {
+    const streamUrl = firstUrl(item.streamUrl, item.stream_url);
+    if (!streamUrl) return null;
+
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(streamUrl);
+    } catch {
+        return null;
+    }
+    if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) return null;
+
+    return {
+        id: String(item.id ?? ''),
+        name: String(item.name ?? ''),
+        description: String(item.description ?? ''),
+        logoUrl: item.logoUrl ?? item.logo ?? null,
+        category: String(item.category ?? 'General'),
+        country: String(item.country ?? 'ID'),
+        language: String(item.language ?? ''),
+        streamUrl: parsedUrl.toString(),
+        streamType: /\.mp4(?:$|[?#])/i.test(parsedUrl.href) ? 'mp4' : 'hls',
+        isAvailable: true,
+        statusMessage: null,
+        checkedAtEpochMs,
+        license: item.license ?? null,
+    };
+}
+
+export function createApp({ movieDatabasePath = MOVIE_DB_PATH, liveDatabasePath = LIVE_DB_PATH } = {}) {
+    const app = express();
+    const readDatabase = createDatabaseReader();
+
+    app.use(cors());
+    app.use(express.json());
+
+    app.get('/', (_req, res) => {
+        res.json({
+            ok: true,
+            service: 'Bytify Backend API',
+            endpoints: ['/health', '/api/catalog.json', '/api/live/channels'],
+        });
     });
-});
 
-// Get All Movies
-app.get('/api/movies', (req, res) => {
-    try {
-        const movies = readDatabase();
-        res.json({
-            ok: true,
-            total: movies.length,
-            data: movies
-        });
-    } catch (err) {
-        res.status(500).json({ ok: false, error: { code: "SERVER_ERROR", message: err.message } });
-    }
-});
+    app.get('/health', (_req, res) => {
+        res.json({ ok: true });
+    });
 
-// Search Movies
-app.get('/api/movies/search', (req, res) => {
-    try {
-        const query = (req.query.q || '').toLowerCase();
-        const movies = readDatabase();
-        const filtered = movies.filter(m => m.title.toLowerCase().includes(query));
-        res.json({
-            ok: true,
-            total: filtered.length,
-            data: filtered
-        });
-    } catch (err) {
-        res.status(500).json({ ok: false, error: { code: "SERVER_ERROR", message: err.message } });
-    }
-});
-
-// Get Movie Detail by ID
-app.get('/api/movies/:id', (req, res) => {
-    try {
-        const movies = readDatabase();
-        const movie = movies.find(m => m.id === req.params.id);
-        if (!movie) {
-            return res.status(404).json({ ok: false, error: { code: "NOT_FOUND", message: "Film tidak ditemukan." } });
+    app.get('/api/catalog.json', (_req, res) => {
+        try {
+            const movies = readDatabase(movieDatabasePath).map(toMovie)
+                .filter((movie) => movie.id && movie.title);
+            res.json({ movies, sections: [], generatedAtEpochMs: Date.now() });
+        } catch (error) {
+            console.error('[Bytify API] Failed to load movie catalog:', error);
+            res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
         }
-        res.json({ ok: true, data: movie });
-    } catch (err) {
-        res.status(500).json({ ok: false, error: { code: "SERVER_ERROR", message: err.message } });
-    }
-});
-
-// Fallback 404
-app.use((req, res) => {
-    res.status(404).json({
-        ok: false,
-        error: { code: "NOT_FOUND", message: "Endpoint tidak ditemukan." }
     });
-});
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Bytify API] Server berjalan di http://localhost:${PORT}`);
-});
+    app.get('/api/live/channels', (_req, res) => {
+        try {
+            const generatedAtEpochMs = Date.now();
+            const channels = readDatabase(liveDatabasePath).map((item) => toLiveChannel(item, generatedAtEpochMs))
+                .filter((channel) => channel && channel.id && channel.name);
+            res.json({ schemaVersion: 1, generatedAtEpochMs, refreshAfterSeconds: 300, channels });
+        } catch (error) {
+            console.error('[Bytify API] Failed to load live catalog:', error);
+            res.status(503).json({ ok: false, error: { code: 'LIVE_CATALOG_UNAVAILABLE', message: 'Katalog Live TV belum tersedia.' } });
+        }
+    });
+
+    app.get('/api/lk21/search', (req, res) => {
+        try {
+            const query = String(req.query.q ?? '').trim().toLowerCase();
+            const movies = readDatabase(movieDatabasePath).filter((item) =>
+                String(item.title ?? '').toLowerCase().includes(query),
+            ).map(toMovie);
+            res.json({ movies });
+        } catch (error) {
+            console.error('[Bytify API] Failed to search movie catalog:', error);
+            res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
+        }
+    });
+
+    app.get('/api/movies/search', (req, res) => {
+        try {
+            const query = String(req.query.q ?? '').trim().toLowerCase();
+            const movies = readDatabase(movieDatabasePath).filter((item) =>
+                String(item.title ?? '').toLowerCase().includes(query),
+            );
+            res.json({ ok: true, total: movies.length, data: movies });
+        } catch (error) {
+            console.error('[Bytify API] Failed to search movie catalog:', error);
+            res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
+        }
+    });
+
+    app.get('/api/movies/:id', (req, res) => {
+        try {
+            const movie = readDatabase(movieDatabasePath).find((item) => item.id === req.params.id);
+            if (!movie) {
+                return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Film tidak ditemukan.' } });
+            }
+            return res.json({ ok: true, data: movie });
+        } catch (error) {
+            console.error('[Bytify API] Failed to load movie detail:', error);
+            return res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
+        }
+    });
+
+    app.get('/api/movies', (_req, res) => {
+        try {
+            const movies = readDatabase(movieDatabasePath);
+            res.json({ ok: true, total: movies.length, data: movies });
+        } catch (error) {
+            console.error('[Bytify API] Failed to load movie catalog:', error);
+            res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
+        }
+    });
+
+    app.use((req, res) => {
+        res.status(404).json({
+            ok: false,
+            error: { code: 'NOT_FOUND', message: `Endpoint ${req.path} tidak ditemukan.` },
+        });
+    });
+
+    return app;
+}
+
+export function startServer() {
+    const port = Number(process.env.PORT) || 8787;
+    const host = process.env.HOST || '0.0.0.0';
+    const server = createApp().listen(port, host, () => {
+        console.log(`[Bytify API] Server listening on ${host}:${port}`);
+    });
+    return server;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+    startServer();
+}

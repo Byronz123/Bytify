@@ -363,34 +363,24 @@ def deep_extract_from_embed(driver, embed_url, max_wait=10, referer=None):
 # 4. METADATA EXTRACTION (Lebih Lengkap)
 # ============================================================
 
-_NOISE_CONTAINERS = re.compile(r'(^|[\s_-])(nav|menu|header|footer|sidebar|widget|related|recommend|popular|breadcrumb)', re.I)
-
-
-def _in_noise(tag):
-    """True jika tag berada di menu/sidebar/footer/related, bukan konten film."""
-    for parent in tag.parents:
-        if parent.name in ("nav", "header", "footer", "aside"):
-            return True
-        ident = " ".join(parent.get("class", []) or []) + " " + (parent.get("id") or "")
-        if ident.strip() and _NOISE_CONTAINERS.search(ident):
-            return True
-    return False
-
+# Selector di bawah ini diverifikasi langsung terhadap HTML asli
+# tv12.lk21official.cc (struktur: div.movie-info > h1 / .info-tag / .tag-list).
 
 def _json_ld_movie(soup):
-    """Ambil objek schema.org Movie/TVSeries dari JSON-LD bila ada."""
+    """Ambil objek schema.org Movie/TVSeries/TVEpisode dari JSON-LD."""
     for script in soup.find_all("script", type="application/ld+json"):
+        raw = script.string or script.get_text() or ""
         try:
-            payload = json.loads(script.string or script.get_text() or "")
+            payload = json.loads(raw)
         except Exception:
             continue
-        stack = payload if isinstance(payload, list) else [payload]
+        stack = list(payload) if isinstance(payload, list) else [payload]
         while stack:
             obj = stack.pop()
             if isinstance(obj, dict):
-                kind = obj.get("@type")
-                kinds = kind if isinstance(kind, list) else [kind]
-                if any(k in ("Movie", "TVSeries", "TVEpisode", "VideoObject") for k in kinds):
+                kinds = obj.get("@type")
+                kinds = kinds if isinstance(kinds, list) else [kinds]
+                if any(k in ("Movie", "TVSeries", "TVEpisode") for k in kinds):
                     return obj
                 stack.extend(v for v in obj.values() if isinstance(v, (dict, list)))
             elif isinstance(obj, list):
@@ -400,141 +390,197 @@ def _json_ld_movie(soup):
 
 def _meta(soup, *names):
     for name in names:
-        tag = soup.find("meta", attrs={"property": name}) or soup.find("meta", attrs={"name": name})
-        if tag and tag.get("content", "").strip():
+        tag = (soup.find("meta", attrs={"property": name}) or
+               soup.find("meta", attrs={"name": name}))
+        if tag and (tag.get("content") or "").strip():
             return tag["content"].strip()
     return ""
 
 
-def _parse_rating(text):
-    match = re.search(r'(\d+(?:[.,]\d+)?)', str(text or ""))
-    if not match:
-        return None
-    score = float(match.group(1).replace(',', '.'))
-    return round(score, 1) if 0 < score <= 10 else None
+def _names(value):
+    """Ambil daftar nama dari field JSON-LD actor/director."""
+    out = []
+    for entry in (value if isinstance(value, list) else [value]):
+        if isinstance(entry, dict) and entry.get("name"):
+            out.append(str(entry["name"]).strip())
+        elif isinstance(entry, str) and entry.strip():
+            out.append(entry.strip())
+    return out
 
 
-_GENERIC_DESC = re.compile(r'(nonton|streaming|download).{0,40}(film|movie|subtitle|sub indo)', re.I)
+_DUR_HM = re.compile(r'^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?$', re.I)
+_RES_RE = re.compile(r'^\d{3,4}p$', re.I)
+_QUAL_RE = re.compile(r'^[A-Za-z]{2,8}$')
+
+
+def _parse_info_tag(info):
+    """div.info-tag berisi span: kualitas (WEBDL), resolusi (1080p), durasi (1h 50m)."""
+    quality = resolution = None
+    duration_min = None
+    for span in info.select(".info-tag span") if info else []:
+        text = span.get_text(" ", strip=True)
+        if not text:
+            continue
+        match = _DUR_HM.match(text)
+        if match and (match.group(1) or match.group(2)):
+            duration_min = int(match.group(1) or 0) * 60 + int(match.group(2) or 0)
+        elif _RES_RE.match(text):
+            resolution = text
+        elif _QUAL_RE.match(text):
+            quality = text.upper()
+    # Bentuk lain: "95 min"
+    if duration_min is None and info:
+        match = re.search(r'(\d{2,3})\s*(?:min|menit)\b', info.get_text(" ", strip=True), re.I)
+        if match:
+            duration_min = int(match.group(1))
+    return quality, resolution, duration_min
+
+
+def _parse_rating(*values):
+    for value in values:
+        match = re.search(r'(\d+(?:[.,]\d+)?)', str(value or ""))
+        if match:
+            score = float(match.group(1).replace(',', '.'))
+            if 0 < score <= 10:
+                return round(score, 1)
+    return None
 
 
 def extract_metadata(soup, target_url):
     """
-    Ekstrak metadata film. Urutan sumber (paling andal dulu):
-    JSON-LD -> meta og/description -> elemen konten utama (menu/sidebar diabaikan).
+    Ekstrak metadata dari halaman detail LK21.
+    Lingkupnya dibatasi ke div.movie-info agar menu genre situs dan
+    kartu film lain di sidebar tidak ikut terambil.
     """
     data = {
         "title": "", "overview": "", "poster_url": None, "backdrop_url": None,
-        "genres": [], "rating": None, "release_year": None, "duration_min": None,
+        "genres": [], "countries": [], "cast": [], "directors": [],
+        "rating": None, "rating_users": None, "release_year": None,
+        "duration_min": None, "quality": None, "resolution": None,
         "language": "id",
     }
     ld = _json_ld_movie(soup)
-    content = (soup.select_one("article") or soup.select_one("main") or
-               soup.select_one(".content, #content, .post, .single") or soup)
+    info = soup.select_one(".movie-info")
 
-    # ---- Judul ----
-    title_tag = content.find("h1") or soup.find("h1")
-    data["title"] = (title_tag.get_text(" ", strip=True) if title_tag else "") or \
-        str(ld.get("name") or "") or _meta(soup, "og:title")
+    # Judul: h1 di dalam .movie-info bersih; og:title dan JSON-LD name
+    # tercemar embel-embel "Lk21 Nonton ... Sub Indo | Streaming dan Download".
+    h1 = (info.find("h1") if info else None) or soup.find("h1")
+    title = h1.get_text(" ", strip=True) if h1 else ""
+    if not title:
+        title = re.sub(r'^lk21\s+nonton\s+', '',
+                       str(ld.get("name") or _meta(soup, "og:title")), flags=re.I)
+        title = re.split(r'\s+sub\s+indo\s*\|', title, flags=re.I)[0].strip()
+    data["title"] = title
 
-    # ---- Sinopsis ----
-    candidates = [str(ld.get("description") or "")]
-    for sel in ("blockquote", ".synopsis", ".sinopsis", "[class*='synopsis']", "[class*='sinopsis']",
-                ".entry-content p", ".desc", ".description", "[itemprop='description']"):
-        for tag in content.select(sel):
-            if not _in_noise(tag):
-                for strong in tag.find_all("strong"):
-                    strong.decompose()
-                candidates.append(tag.get_text(" ", strip=True))
-    candidates += [_meta(soup, "og:description", "description", "twitter:description")]
-    for text in candidates:
-        text = re.sub(r'^(synopsis|sinopsis)\s*[:\-]?\s*', '', (text or "").strip(), flags=re.I)
-        if len(text) >= 40 and not _GENERIC_DESC.search(text[:120]):
+    # Sinopsis: div.synopsis. Deskripsi JSON-LD/og hanya template SEO, jadi diabaikan.
+    synopsis = soup.select_one(".synopsis")
+    if synopsis:
+        # Saat .synopsis "collapsed", teks tampilnya terpotong "..." dan
+        # versi utuhnya ada di atribut data-full.
+        text = (synopsis.get("data-full") or "").strip()
+        if not text:
+            for strong in synopsis.find_all("strong"):
+                strong.decompose()
+            text = synopsis.get_text(" ", strip=True)
+        text = re.sub(r'^(synopsis|sinopsis)\s*[:\-]?\s*', '', text, flags=re.I).strip()
+        if len(text) >= 20:
             data["overview"] = text
-            break
 
-    # ---- Poster: og:image khusus halaman ini, lalu JSON-LD, lalu img di konten utama ----
+    # Poster: og:image sudah poster film ini (bukan kartu film lain).
     poster = _meta(soup, "og:image", "twitter:image")
     if not poster:
-        img = ld.get("image")
-        poster = (img.get("url") if isinstance(img, dict) else img[0] if isinstance(img, list) and img else img) or ""
-    if not poster:
-        for tag in content.select(".content-poster img, .poster img, .thumb img, img[class*='poster'], img[itemprop='image']"):
-            if _in_noise(tag):
-                continue
-            poster = tag.get("data-src") or tag.get("data-lazy-src") or tag.get("src") or ""
-            if poster:
-                break
+        image = ld.get("image")
+        if isinstance(image, dict):
+            poster = image.get("url", "")
+        elif isinstance(image, list) and image:
+            poster = image[0]
+        elif isinstance(image, str):
+            poster = image
     if poster:
         data["poster_url"] = urljoin(target_url, str(poster).split(" ")[0])
     data["backdrop_url"] = data["poster_url"]
 
-    # ---- Rating ----
-    agg = ld.get("aggregateRating") or {}
-    if isinstance(agg, dict):
-        data["rating"] = _parse_rating(agg.get("ratingValue"))
+    # Rating: JSON-LD aggregateRating, lalu .rating-score / .rating-number
+    agg = ld.get("aggregateRating") if isinstance(ld.get("aggregateRating"), dict) else {}
+    score_el = soup.select_one(".rating-score") or soup.select_one(".rating-number")
+    data["rating"] = _parse_rating(agg.get("ratingValue"),
+                                   score_el.get_text(strip=True) if score_el else None)
+    users = agg.get("ratingCount")
+    if not users:
+        users_el = soup.select_one(".rating-users")
+        match = re.search(r'([\d.,]+)', users_el.get_text() if users_el else "")
+        users = match.group(1).replace('.', '').replace(',', '') if match else None
+    try:
+        data["rating_users"] = int(users) if users else None
+    except (TypeError, ValueError):
+        data["rating_users"] = None
 
-    # ---- Label/Nilai di sidebar info (h2/h3, dt/dd, th/td, "Label: nilai") ----
-    pairs = []
-    for h in content.find_all(["h2", "h3", "h4", "dt", "th", "span", "strong", "b"]):
-        if _in_noise(h):
-            continue
-        label = h.get_text(" ", strip=True).lower().rstrip(":")
-        if not label or len(label) > 20:
-            continue
-        nxt = h.find_next_sibling()
-        value = nxt.get_text(" ", strip=True) if nxt else ""
-        if not value and h.next_sibling and isinstance(h.next_sibling, str):
-            value = h.next_sibling.strip(" :")
-        pairs.append((label, value))
-    text_all = content.get_text(" ", strip=True)
-    for label, value in pairs:
-        if data["rating"] is None and ("imdb" in label or "rating" in label):
-            data["rating"] = _parse_rating(value)
-        elif data["duration_min"] is None and ("durasi" in label or "duration" in label or "runtime" in label):
-            m = re.search(r'(\d+)\s*(?:h|jam)\D*(\d+)?', value, re.I)
-            if m:
-                data["duration_min"] = int(m.group(1)) * 60 + int(m.group(2) or 0)
-            else:
-                m = re.search(r'(\d{2,3})', value)
-                data["duration_min"] = int(m.group(1)) if m else None
-        elif data["release_year"] is None and any(k in label for k in ("diterbitkan", "rilis", "release", "tahun", "year")):
-            m = re.search(r'((?:19|20)\d{2})', value)
-            data["release_year"] = int(m.group(1)) if m else None
-    if data["rating"] is None:
-        m = re.search(r'imdb\s*[:\-]?\s*(\d+(?:[.,]\d+)?)', text_all, re.I)
-        data["rating"] = _parse_rating(m.group(1)) if m else None
+    # Kualitas, resolusi, durasi dari div.info-tag
+    data["quality"], data["resolution"], data["duration_min"] = _parse_info_tag(info)
+    if data["duration_min"] is None and ld.get("duration"):
+        match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?', str(ld["duration"]))
+        if match and (match.group(1) or match.group(2)):
+            data["duration_min"] = int(match.group(1) or 0) * 60 + int(match.group(2) or 0)
 
-    # ---- Genre: JSON-LD, lalu link /genre/ di konten utama (bukan menu) ----
-    genres = ld.get("genre") or []
-    genres = [genres] if isinstance(genres, str) else list(genres)
-    if not genres:
-        for a in content.find_all("a", href=True):
-            if "/genre/" in a["href"] and not _in_noise(a):
-                g = a.get_text(" ", strip=True)
-                if g:
-                    genres.append(g)
+    # Genre: JSON-LD dulu; fallback ke .tag-list (BUKAN seluruh halaman,
+    # karena a[href*="/genre/"] global akan menarik 27 genre dari menu situs).
+    genres = [g for g in ([ld.get("genre")] if isinstance(ld.get("genre"), str)
+                          else list(ld.get("genre") or [])) if g]
+    if not genres and info:
+        genres = [a.get_text(" ", strip=True)
+                  for a in info.select('.tag-list a[href*="/genre/"]')]
     seen, clean = set(), []
-    for g in genres:
-        key = str(g).strip().lower()
+    for genre in genres:
+        key = str(genre).strip().lower()
         if key and key not in seen:
             seen.add(key)
-            clean.append(str(g).strip().title() if str(g).isupper() else str(g).strip())
-    # Lebih dari 8 genre hampir pasti menu situs yang ikut terambil
-    data["genres"] = clean if len(clean) <= 8 else []
+            clean.append(str(genre).strip())
+    data["genres"] = clean
 
-    # ---- Tahun & durasi dari JSON-LD / judul ----
-    if data["release_year"] is None:
-        m = re.search(r'((?:19|20)\d{2})', str(ld.get("datePublished") or ""))
-        data["release_year"] = int(m.group(1)) if m else None
+    # Negara dari .tag-list
+    if info:
+        data["countries"] = [a.get_text(" ", strip=True)
+                             for a in info.select('.tag-list a[href*="/country/"]')]
+
+    data["cast"] = _names(ld.get("actor"))
+    data["directors"] = _names(ld.get("director"))
+
+    # Tahun rilis: datePublished, lalu "(2024)" di judul
+    match = re.search(r'((?:19|20)\d{2})', str(ld.get("datePublished") or ""))
+    if match:
+        data["release_year"] = int(match.group(1))
     if data["release_year"] is None and data["title"]:
-        m = re.search(r'\((\d{4})\)', data["title"])
-        data["release_year"] = int(m.group(1)) if m else None
-    if data["duration_min"] is None and ld.get("duration"):
-        m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?', str(ld["duration"]))
-        if m and (m.group(1) or m.group(2)):
-            data["duration_min"] = int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+        match = re.search(r'\((\d{4})\)', data["title"])
+        if match:
+            data["release_year"] = int(match.group(1))
 
     return data
+
+
+def extract_servers(soup, target_url):
+    """
+    Daftar server player. Diambil dari #player-select (paling lengkap,
+    pada contoh nyata memuat turbovip yang tidak ada di #player-list)
+    digabung dengan #player-list.
+    """
+    servers, seen = [], set()
+    for option in soup.select("#player-select option"):
+        url = (option.get("value") or "").strip()
+        if url.startswith("http") and url not in seen and not is_junk_url(url):
+            seen.add(url)
+            servers.append({"server": (option.get("data-server") or "").lower(), "url": url})
+    for link in soup.select("#player-list a[data-url], #player-list a[href^='http']"):
+        url = (link.get("data-url") or link.get("href") or "").strip()
+        if url.startswith("http") and url not in seen and not is_junk_url(url):
+            seen.add(url)
+            servers.append({"server": (link.get("data-server") or "").lower(), "url": url})
+    # Fallback: iframe #main-player
+    if not servers:
+        iframe = soup.select_one("#main-player, iframe[src*='videonode'], iframe[src]")
+        src = (iframe.get("src") or iframe.get("data-src") or "") if iframe else ""
+        if src and not is_junk_url(src):
+            servers.append({"server": "default", "url": urljoin(target_url, src)})
+    return servers
 
 
 # ============================================================
@@ -543,8 +589,17 @@ def extract_metadata(soup, target_url):
 
 def scrape_with_driver(driver, target_url):
     """
-    Mengekstrak data film secara lengkap dengan filter anti-junk.
+    Ekstrak satu film dari halaman detail LK21.
     Output kompatibel dengan kontrak MovieDto Bytify.
+
+    Catatan hasil pengujian pada situs asli:
+      - URL embed videonode yang dibuka LANGSUNG akan dialihkan ke homepage,
+        karena player mensyaratkan Referer dari halaman film. Maka scraper
+        tidak menavigasi ke embed; URL server diambil dari DOM halaman film.
+      - Satu-satunya media yang dimuat otomatis di halaman adalah video iklan
+        donasi.assetsy.de/stopjudi/*.mp4. Itu disaring is_valid_media_url().
+      - m3u8 asli baru muncul setelah melewati gerbang iklan popunder di dalam
+        iframe. Aktifkan lewat env BYTIFY_DEEP=1 bila memang diperlukan.
     """
     slug = re.sub(r'[^a-zA-Z0-9]', '-', target_url.rstrip('/').split('/')[-1]).lower()
     slug = re.sub(r'-+', '-', slug).strip('-')
@@ -559,28 +614,31 @@ def scrape_with_driver(driver, target_url):
         "releaseYear": None,
         "durationMin": None,
         "genres": [],
+        "countries": [],
+        "cast": [],
+        "directors": [],
         "rating": None,
+        "ratingUsers": None,
+        "quality": None,
+        "resolution": None,
         "language": "id",
-        "videoUrl": None,        # Direct m3u8/mp4 (prioritas tertinggi)
-        "embedUrl": None,        # Embed iframe URL (fallback)
+        "videoUrl": None,
+        "embedUrl": None,
+        "servers": [],
         "trailerUrl": None,
-        "subtitles": [],
-        "lk21_url": target_url,  # Referensi internal
+        "subtitles": [],       # LK21 memakai hardsub; tidak ada berkas .srt/.vtt
+        "lk21_url": target_url,
         "dl_urls": [],
-        "stream_urls": [],       # Semua stream URL yang ditemukan (sudah difilter)
+        "stream_urls": [],
     }
 
-    # Bersihkan performance log
     try:
-        driver.get_log("performance")
+        driver.get_log("performance")  # buang log sisa halaman sebelumnya
     except Exception:
         pass
 
-    # Muat halaman utama
     driver.get(target_url)
     wait_for_cloudflare(driver)
-
-    # Scroll untuk trigger lazy loading
     try:
         driver.execute_script("window.scrollTo(0, 600);")
         time.sleep(1)
@@ -589,90 +647,74 @@ def scrape_with_driver(driver, target_url):
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-    # ---- Ekstrak Metadata ----
     meta = extract_metadata(soup, target_url)
     data["title"] = meta["title"] or data["title"]
     data["overview"] = meta["overview"]
     data["posterUrl"] = meta["poster_url"]
     data["backdropUrl"] = meta["backdrop_url"]
     data["genres"] = meta["genres"]
+    data["countries"] = meta["countries"]
+    data["cast"] = meta["cast"]
+    data["directors"] = meta["directors"]
     data["rating"] = meta["rating"]
+    data["ratingUsers"] = meta["rating_users"]
     data["releaseYear"] = meta["release_year"]
     data["durationMin"] = meta["duration_min"]
+    data["quality"] = meta["quality"]
+    data["resolution"] = meta["resolution"]
 
-    # Deteksi apakah ini series
-    is_series = bool(soup.find('div', class_=re.compile(r'episode|serial', re.I)))
-    if is_series:
+    if soup.select_one("#episode-list, .episode-list, [class*='episode']"):
         data["type"] = "series"
 
-    # ---- Cari Embed URL (iframe player) ----
-    embed_candidates = []
-    for iframe in soup.find_all('iframe'):
-        src = (iframe.get('src') or iframe.get('data-src') or
-               iframe.get('data-url') or iframe.get('data-link'))
-        if src:
-            full_src = urljoin(target_url, src)
-            if is_valid_embed_url(full_src):
-                embed_candidates.append(full_src)
-            elif not is_junk_url(full_src) and any(k in src.lower() for k in ['embed', 'play', 'player', 'stream']):
-                embed_candidates.append(full_src)
+    # ---- Server player ----
+    servers = extract_servers(soup, target_url)
+    data["servers"] = servers
+    server_urls = [s["url"] for s in servers]
+    if server_urls:
+        data["embedUrl"] = server_urls[0]
 
-    # Jika tidak ditemukan iframe, coba klik server button
-    if not embed_candidates:
-        try:
-            server_buttons = driver.find_elements(
-                By.CSS_SELECTOR,
-                ".player-option, .servers li, [data-server], .dropdown-menu a"
-            )
-            if server_buttons:
-                driver.execute_script("arguments[0].click();", server_buttons[0])
-                time.sleep(1.5)
-                soup_refreshed = BeautifulSoup(driver.page_source, 'html.parser')
-                for iframe in soup_refreshed.find_all('iframe'):
-                    src = iframe.get('src') or iframe.get('data-src')
-                    if src:
-                        full_src = urljoin(target_url, src)
-                        if not is_junk_url(full_src):
-                            embed_candidates.append(full_src)
-        except Exception:
-            pass
+    # ---- Trailer ----
+    trailer = soup.select_one("a[href*='youtube.com'], a[href*='youtu.be'], #yt-iframe[src]")
+    if trailer:
+        href = trailer.get("href") or trailer.get("src")
+        if href and href.startswith("http"):
+            data["trailerUrl"] = href
 
-    # Pilih embed URL terbaik
-    if embed_candidates:
-        # Prioritaskan domain embed yang dikenal
-        known = [u for u in embed_candidates if is_valid_embed_url(u)]
-        data["embedUrl"] = known[0] if known else embed_candidates[0]
-
-    # ---- Cari Link Download (DL_URL) ----
-    dl_keywords = ['download', 'racaty', 'hxfile', 'drive.google', 'terabox',
-                   'uptobox', 'mediafire', 'pixeldrain', 'krakenfiles']
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        text = a.get_text().lower()
-        if any(k in href.lower() or k in text for k in dl_keywords):
-            if href.startswith('http') and 'imdb.com' not in href and not is_junk_url(href):
+    # ---- Link download ----
+    for a in soup.select(".movie-action a[href^='http'], a[href*='download']"):
+        href = a.get("href", "")
+        if href.startswith("http") and "imdb.com" not in href and not is_junk_url(href):
+            if href not in data["dl_urls"]:
                 data["dl_urls"].append(href)
 
-    # ---- Deep Extract Stream dari Embed ----
-    if data["embedUrl"]:
-        streams = deep_extract_from_embed(driver, data["embedUrl"], referer=target_url)
-        data["stream_urls"] = streams
+    # ---- Media langsung dari log jaringan (iklan stopjudi tersaring) ----
+    direct = extract_network_media_clean(driver)
 
-        # Set videoUrl ke stream terbaik (m3u8 > mp4)
-        for stream in streams:
-            if '.m3u8' in stream.lower():
-                data["videoUrl"] = stream
+    # ---- Deep extract opsional (harus melewati gerbang iklan; lambat) ----
+    if os.environ.get("BYTIFY_DEEP") == "1" and data["embedUrl"]:
+        direct += deep_extract_from_embed(driver, data["embedUrl"], referer=target_url)
+        driver.get(target_url)  # kembali agar state konsisten
+
+    # stream_urls = media langsung (jika ada) + seluruh URL server
+    seen, streams = set(), []
+    for url in direct + server_urls:
+        if url and url not in seen:
+            seen.add(url)
+            streams.append(url)
+    data["stream_urls"] = streams
+
+    # videoUrl: m3u8 > mp4 > embed server pertama
+    for url in streams:
+        if '.m3u8' in url.lower():
+            data["videoUrl"] = url
+            break
+    if not data["videoUrl"]:
+        for url in streams:
+            if '.mp4' in url.lower():
+                data["videoUrl"] = url
                 break
-        if not data["videoUrl"] and streams:
-            data["videoUrl"] = streams[0]
-
-    # Jika tidak ada direct stream, gunakan embed sebagai videoUrl
-    if not data["videoUrl"] and data["embedUrl"]:
+    if not data["videoUrl"]:
         data["videoUrl"] = data["embedUrl"]
-
-    # ---- Deduplicate ----
-    data["dl_urls"] = list(set(data["dl_urls"]))
-    data["stream_urls"] = list(set(data["stream_urls"]))
 
     return data
 

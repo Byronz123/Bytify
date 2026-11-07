@@ -93,6 +93,7 @@ def to_api_record(item):
     year = item.get("releaseYear") or item.get("year") or None
 
     item.update({
+        "servers": item.get("servers") or [],
         "embedUrl": embed,
         "videoUrl": video,
         "stream_urls": streams,
@@ -112,8 +113,9 @@ def to_api_record(item):
 def needs_rescrape(item):
     """Entri dari scraper lama yang metadatanya rusak: genre berisi menu situs, atau tanpa sinopsis & rating."""
     genres = item.get("genres") or []
-    no_info = not (item.get("overview") or "").strip() and item.get("rating") in (None, "", "N/A")
-    return len(genres) > 8 or no_info or not item.get("videoUrl")
+    no_info = not (item.get("overview") or "").strip() or item.get("rating") in (None, "", "N/A")
+    return (len(genres) > 8 or no_info or not item.get("videoUrl")
+            or not item.get("servers") or item.get("durationMin") in (None, 0))
 
 
 def clean_existing_database(db):
@@ -138,11 +140,12 @@ def normalize_to_movie_dto(item):
         year = None
 
     title = item.get("title") or "Unknown"
+    overview = (item.get("overview") or "").strip()
     return {
         "id": dto_id,
         "type": movie_type,
         "title": title,
-        "overview": item.get("overview") or f"Tonton {title} Subtitle Indonesia di Bytify.",
+        "overview": overview or f"Tonton {title} Subtitle Indonesia di Bytify.",
         "posterUrl": item.get("posterUrl"),
         "backdropUrl": item.get("backdropUrl") or item.get("posterUrl"),
         "releaseYear": year,
@@ -154,6 +157,12 @@ def normalize_to_movie_dto(item):
         "trailerUrl": item.get("trailerUrl"),
         "subtitles": item.get("subtitles") or [],
         "episodes": item.get("episodes") or [],
+        "countries": item.get("countries") or [],
+        "cast": item.get("cast") or [],
+        "directors": item.get("directors") or [],
+        "quality": item.get("quality"),
+        "resolution": item.get("resolution"),
+        "servers": item.get("servers") or [],
         "license": "LK21 Stream Adapter",
     }
 
@@ -260,12 +269,13 @@ def worker_task(worker_id, url_queue):
                 stats["success"] += 1
 
                 video = item.get("videoUrl") or ""
+                nserver = len(item.get("servers") or [])
                 if ".m3u8" in video.lower() or ".mp4" in video.lower():
                     stats["m3u8_found"] += 1
                     video_icon = "stream"
                 elif item.get("embedUrl"):
                     stats["embed_only"] += 1
-                    video_icon = "embed"
+                    video_icon = f"embed x{nserver}"
                 else:
                     stats["no_video"] += 1
                     video_icon = "-"
@@ -273,7 +283,8 @@ def worker_task(worker_id, url_queue):
                 print(
                     f"[W-{worker_id}] [{idx}/{total_to_process}] OK {item['title'][:40]} | "
                     f"Poster:{'v' if item.get('posterUrl') else 'x'} Video:{video_icon} "
-                    f"Sinopsis:{'v' if item.get('overview') else 'x'} Rating:{item.get('rating') or '-'}"
+                    f"Sinopsis:{'v' if item.get('overview') else 'x'} "
+                    f"Rating:{item.get('rating') or '-'} Durasi:{item.get('durationMin') or '-'}m"
                 )
                 if stats["success"] % SAVE_EVERY == 0:
                     save_db_safely()

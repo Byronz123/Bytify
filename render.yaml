@@ -1,15 +1,13 @@
-# Render Blueprint untuk backend Bytify (film, serial, Live TV).
-# Panduan: docs/deploy-render.md
 services:
   - type: web
     name: bytify-api
     runtime: node
     # free = tidur setelah 15 menit tanpa request; starter = menyala 24/7.
-    plan: starter
+    plan: free
     region: singapore
-    branch: feature/complete-1.3.0
+    branch: main  # <-- UBAH INI ke nama branch Anda (misal: main atau master)
     rootDir: backend/api
-    buildCommand: npm install --omit=dev
+    buildCommand: npm install
     startCommand: node server.mjs
     healthCheckPath: /health
     autoDeploy: true
@@ -18,21 +16,5 @@ services:
         value: "20"
       - key: HOST
         value: 0.0.0.0
-      # Render mengisi PORT sendiri; server membaca process.env.PORT.
       - key: LOG_LEVEL
         value: info
-      - key: MOVIE_PROVIDERS
-        value: archive
-      - key: MOVIE_REFRESH_SECONDS
-        value: "21600"
-      - key: ARCHIVE_MAX_MOVIES
-        value: "80"
-      - key: ARCHIVE_MAX_SERIES
-        value: "20"
-      # Live TV: isi di dashboard Render setelah punya playlist berizin.
-      - key: LIVE_PLAYLIST_URLS
-        sync: false
-      - key: LIVE_SOURCE_RIGHTS_CONFIRMED
-        value: "false"
-      - key: LIVE_SOURCE_LICENSE_LABEL
-        sync: false

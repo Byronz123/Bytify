@@ -187,7 +187,7 @@ fun SettingsScreen() {
                     confirm = "Hapus riwayat putar?" to { scope.launch { c.library.clearHistory() } }
                 }
                 Divider()
-                ActionRow(Icons.Outlined.ManageSearch, "Hapus riwayat pencarian", null) {
+                ActionRow(Icons.Outlined.History, "Hapus riwayat pencarian", null) {
                     confirm = "Hapus riwayat pencarian?" to { scope.launch { c.settings.clearSearchHistory() } }
                 }
             }

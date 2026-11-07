@@ -59,12 +59,34 @@ class MovieRepository(
                 MovieSectionEntity(
                     title = section.title,
                     movieIdsJson = json.encodeToString(section.movieIds),
-                    updatedAt = now + index, // urutan section mengikuti server
+                    updatedAt = now + index,
                 )
             }
             .toList()
         dao.replaceMovieSections(validSections)
         return validMovies.size
+    }
+
+    /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */
+    suspend fun enrichIfNeeded(movie: Movie) {
+        if (!movie.id.startsWith("lk21-")) return
+        if (!movie.isSeries && !movie.overview.startsWith("Tonton ") && movie.overview.isNotBlank()) return
+        val detailedDto = api.fetchLk21Details(movie.id) ?: return
+        val enriched = detailedDto.toMovie()
+        dao.upsertMovies(listOf(enriched.toEntity(json, System.currentTimeMillis())))
+    }
+
+    /** Mencari film/serial ke server LK21 dan menyimpannya ke database lokal agar langsung tampil di UI. */
+    suspend fun searchRemoteAndCache(query: String) {
+        val results = api.searchRemote(query)
+        if (results.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val entities = results
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .map { it.toMovie().toEntity(json, now) }
+        if (entities.isNotEmpty()) {
+            dao.upsertMovies(entities)
+        }
     }
 
     suspend fun setFavorite(movie: Movie, favorite: Boolean) {
@@ -77,10 +99,8 @@ class MovieRepository(
 
     suspend fun playbackHistory(movieId: String) = dao.movieHistoryById(movieId)
 
-    /** Riwayat tontonan seluruh film/episode, terbaru di atas. */
     val history = dao.movieHistory()
 
-    /** Untuk serial, posisi disimpan per episode (kunci = id episode). */
     suspend fun savePlaybackPosition(movie: Movie, positionMs: Long, durationMs: Long, episode: EpisodeDto? = null) {
         dao.upsertMovieHistory(
             com.bytify.app.data.db.MovieHistoryEntity(

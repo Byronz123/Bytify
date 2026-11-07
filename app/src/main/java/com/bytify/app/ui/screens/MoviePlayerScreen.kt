@@ -1,12 +1,22 @@
 package com.bytify.app.ui.screens
 
+import android.annotation.SuppressLint
 import android.net.Uri
+import android.os.Message
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.Button
@@ -39,6 +51,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -57,10 +70,12 @@ import com.bytify.app.ui.components.VideoStage
 import com.bytify.app.ui.components.VideoWindowEffect
 import com.bytify.app.ui.components.friendlyMessage
 import com.bytify.app.ui.components.isLandscape
+import com.bytify.app.ui.components.toggleFullscreen
 import com.bytify.app.ui.theme.BytifyColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.ByteArrayInputStream
 
 @Composable
 fun MoviePlayerScreen(movieId: String, episodeId: String?) {
@@ -83,7 +98,6 @@ fun MoviePlayerScreen(movieId: String, episodeId: String?) {
         }
         return
     }
-    // Episode yang dipilih bisa berganti tanpa keluar dari layar (episode berikutnya).
     var currentEpisodeId by rememberSaveable(movieId) {
         mutableStateOf(if (item.isSeries) (item.episode(episodeId) ?: item.episodes.firstOrNull())?.id else null)
     }
@@ -103,9 +117,18 @@ private fun subtitleConfigs(subtitles: List<MovieSubtitleDto>) = subtitles.mapNo
         .setMimeType(mimeType)
         .setLanguage(subtitle.lang.ifBlank { "und" })
         .setLabel(subtitle.label.ifBlank { subtitle.lang.ifBlank { "Subtitle" } })
-        // Subtitle Indonesia otomatis aktif bila tersedia.
         .setSelectionFlags(if (subtitle.lang.equals("id", true)) C.SELECTION_FLAG_DEFAULT else 0)
         .build()
+}
+
+private fun isEmbedStreamUrl(url: String): Boolean {
+    val lower = url.lowercase()
+    if (lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.contains(".m3u8?")) return false
+    return lower.contains("/api/lk21/resolve/") ||
+        lower.contains("embed") ||
+        lower.contains("hydrax") ||
+        lower.contains("turbovid") ||
+        lower.contains("castlehoud")
 }
 
 @Composable
@@ -120,16 +143,15 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     val subtitles = episode?.subtitles?.takeIf { it.isNotEmpty() } ?: if (episode == null) movie.subtitles else emptyList()
     var buffering by remember(playKey) { mutableStateOf(true) }
     var playbackError by remember(playKey) { mutableStateOf<String?>(null) }
+    var useEmbedPlayer by remember(playKey, videoUrl) { mutableStateOf(isEmbedStreamUrl(videoUrl)) }
     val nextEpisode = episode?.let { current -> movie.episodes.getOrNull(movie.episodes.indexOfFirst { it.id == current.id } + 1) }
     val latestNext by rememberUpdatedState(nextEpisode)
 
     VideoWindowEffect(fullscreen)
     BackHandler {
-        // Saat lanskap, kembali dulu ke potret; tekan lagi untuk keluar.
-        if (fullscreen) com.bytify.app.ui.components.toggleFullscreen(context, false) else app.navController.popBackStack()
+        if (fullscreen) toggleFullscreen(context, false) else app.navController.popBackStack()
     }
 
-    // Satu ExoPlayer per layar; dilepas saat layar ditutup (lihat onDispose di bawah).
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             setAudioAttributes(
@@ -151,9 +173,13 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         app.container.appScope.launch { repository.savePlaybackPosition(movie, position, duration, episode) }
     }
 
-    // Ganti media saat episode berganti, lalu lanjutkan dari posisi terakhir.
-    LaunchedEffect(playKey) {
-        app.container.player.pause() // musik tidak bercampur dengan audio film
+    LaunchedEffect(playKey, useEmbedPlayer) {
+        app.container.player.pause()
+        if (useEmbedPlayer) {
+            exoPlayer.stop()
+            repository.savePlaybackPosition(movie, 10_000L, durationOf().coerceAtLeast(60_000L), episode)
+            return@LaunchedEffect
+        }
         exoPlayer.setMediaItem(
             MediaItem.Builder()
                 .setMediaId(playKey)
@@ -170,15 +196,14 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         exoPlayer.playWhenReady = true
     }
 
-    // Simpan posisi berkala selama diputar.
-    LaunchedEffect(playKey) {
+    LaunchedEffect(playKey, useEmbedPlayer) {
+        if (useEmbedPlayer) return@LaunchedEffect
         while (isActive) {
             delay(10_000L)
             if (exoPlayer.isPlaying) savePosition()
         }
     }
 
-    // Dideklarasikan sebelum listener: efek dilepas terbalik, jadi posisi tersimpan dulu baru player dilepas.
     DisposableEffect(exoPlayer) { onDispose { exoPlayer.release() } }
 
     DisposableEffect(exoPlayer, playKey) {
@@ -189,18 +214,25 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 if (playbackState == Player.STATE_ENDED) {
                     val duration = durationOf()
                     savePosition(duration, duration)
-                    latestNext?.let(onSelectEpisode) // putar episode berikutnya otomatis
+                    latestNext?.let(onSelectEpisode)
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 buffering = false
-                playbackError = error.friendlyMessage(live = false)
+                if (videoUrl.contains("/api/lk21/") ||
+                    error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
+                ) {
+                    useEmbedPlayer = true
+                } else {
+                    playbackError = error.friendlyMessage(live = false)
+                }
             }
         }
         exoPlayer.addListener(listener)
         onDispose {
-            savePosition()
+            if (!useEmbedPlayer) savePosition()
             exoPlayer.removeListener(listener)
         }
     }
@@ -211,10 +243,10 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
                     resume = exoPlayer.playWhenReady
-                    savePosition()
+                    if (!useEmbedPlayer) savePosition()
                     exoPlayer.pause()
                 }
-                Lifecycle.Event.ON_START -> if (resume) exoPlayer.play()
+                Lifecycle.Event.ON_START -> if (resume && !useEmbedPlayer) exoPlayer.play()
                 else -> Unit
             }
         }
@@ -230,7 +262,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     }
 
     if (fullscreen) {
-        VideoStage(exoPlayer, fullscreen = true, buffering = buffering, error = playbackError, onRetry = retry)
+        if (useEmbedPlayer) {
+            EmbedVideoStage(videoUrl = videoUrl, fullscreen = true, onToggleFullscreen = { toggleFullscreen(context, false) })
+        } else {
+            VideoStage(exoPlayer, fullscreen = true, buffering = buffering, error = playbackError, onRetry = retry)
+        }
         return
     }
 
@@ -247,13 +283,17 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 )
             }
             if (nextEpisode != null) {
-                IconButton(onClick = { savePosition(); onSelectEpisode(nextEpisode) }) {
+                IconButton(onClick = { if (!useEmbedPlayer) savePosition(); onSelectEpisode(nextEpisode) }) {
                     Icon(Icons.Rounded.SkipNext, contentDescription = "Episode berikutnya", tint = Color.White)
                 }
             }
         }
 
-        VideoStage(exoPlayer, fullscreen = false, buffering = buffering, error = playbackError, onRetry = retry)
+        if (useEmbedPlayer) {
+            EmbedVideoStage(videoUrl = videoUrl, fullscreen = false, onToggleFullscreen = { toggleFullscreen(context, true) })
+        } else {
+            VideoStage(exoPlayer, fullscreen = false, buffering = buffering, error = playbackError, onRetry = retry)
+        }
 
         if (movie.isSeries) {
             Text(
@@ -267,7 +307,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     val active = ep.id == episode?.id
                     Row(
                         Modifier.fillMaxWidth()
-                            .clickable(enabled = !active) { savePosition(); onSelectEpisode(ep) }
+                            .clickable(enabled = !active) { if (!useEmbedPlayer) savePosition(); onSelectEpisode(ep) }
                             .padding(horizontal = 18.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -298,11 +338,98 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 style = MaterialTheme.typography.titleLarge,
             )
             Text(
-                if (subtitles.isEmpty()) "Subtitle belum tersedia dari sumber untuk judul ini."
+                if (useEmbedPlayer) "Mode pemutar embed aktif. Putar perangkat ke lanskap atau ketuk ikon layar penuh di pojok video."
+                else if (subtitles.isEmpty()) "Subtitle belum tersedia dari sumber untuk judul ini."
                 else "Pilih subtitle lewat tombol CC di pemutar. Posisi tontonan disimpan otomatis.",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
                 color = Color.LightGray,
                 style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun EmbedVideoStage(
+    videoUrl: String,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
+) {
+    val adDomains = remember {
+        listOf(
+            "doubleclick.net", "googlesyndication.com", "popads.net",
+            "popcash.net", "propellerads.com", "adsterra.com",
+            "exoclick.com", "juicyads.com", "onclickads.net", "histats.com"
+        )
+    }
+    val boxMod = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+
+    Box(boxMod.background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    keepScreenOn = true
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        loadsImagesAutomatically = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        setSupportMultipleWindows(false)
+                        javaScriptCanOpenWindowsAutomatically = false
+                        userAgentString =
+                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                    }
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message?,
+                        ): Boolean = false
+                    }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean {
+                            val reqUrl = request?.url?.toString().orEmpty().lowercase()
+                            if (adDomains.any { reqUrl.contains(it) }) return true
+                            if (!reqUrl.startsWith("http://") && !reqUrl.startsWith("https://")) return true
+                            return false
+                        }
+
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            val reqUrl = request?.url?.toString().orEmpty().lowercase()
+                            if (adDomains.any { reqUrl.contains(it) }) {
+                                return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+                    }
+                    loadUrl(videoUrl)
+                }
+            },
+            onRelease = { webView ->
+                webView.stopLoading()
+                webView.destroy()
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        IconButton(
+            onClick = onToggleFullscreen,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+        ) {
+            Icon(
+                if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                contentDescription = "Layar penuh",
+                tint = Color.White,
             )
         }
     }

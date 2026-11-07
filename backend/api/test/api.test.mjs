@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.mjs';
 import { createMovieService, normalizeItem, buildSections } from '../src/movies.mjs';
 import { createLiveService } from '../src/live.mjs';
+import { lk21Provider } from '../src/lk21.mjs';
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 
@@ -115,4 +116,67 @@ test('live endpoints answer 503 when no provider is configured', async () => {
     assert.equal(res.status, 503);
     assert.equal(res.body.error.code, 'LIVE_NOT_CONFIGURED');
   } finally { await api.close(); }
+});
+
+test('lk21 custom API base URL can seed movie data', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes('/popular/movies')) {
+      return new Response(JSON.stringify([{ _id: 'sample-film', title: 'Sample Film', type: 'movie', posterImg: 'https://example.com/poster.jpg', rating: '8.8', genres: ['Drama'] }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (target.includes('/search/')) {
+      return new Response(JSON.stringify([{ _id: 'sample-film', title: 'Sample Film', type: 'movie', posterImg: 'https://example.com/poster.jpg', rating: '8.8', genres: ['Drama'] }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected fetch ${target}`);
+  };
+  try {
+    const provider = lk21Provider({
+      apiBaseUrl: 'https://api.example.com',
+      lk21Url: 'https://site.example',
+      ndUrl: 'https://nd.example',
+      publicBaseUrl: 'http://10.0.2.2:8787',
+    }, quiet);
+    const loaded = await provider.load();
+    assert.equal(loaded.items.length, 1);
+    assert.equal(loaded.items[0].title, 'Sample Film');
+    const search = await provider.searchRemote('film');
+    assert.equal(search[0].title, 'Sample Film');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('xtream live source can load channels from custom API', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes('player_api.php')) {
+      return new Response(JSON.stringify([
+        { stream_id: 101, name: 'Channel Test', category: 'News', country: 'ID', stream_icon: 'https://example.com/logo.png' },
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected fetch ${target}`);
+  };
+  try {
+    const live = createLiveService({
+      sourceUrls: [],
+      xtreamUrl: 'https://xtream.example',
+      xtreamUsername: 'demo',
+      xtreamPassword: 'secret',
+      xtreamFormat: 'm3u8',
+      rightsConfirmed: true,
+      licenseLabel: 'demo license',
+      healthCheckMs: 120000,
+      probeTimeoutMs: 5000,
+      maxChannels: 10,
+      concurrency: 2,
+      defaultCountry: 'ID',
+    }, quiet);
+    const ok = await live.refreshSources();
+    assert.equal(ok, true);
+    assert.equal(live.list()[0].streamUrl, 'https://xtream.example/live/demo/secret/101.m3u8');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

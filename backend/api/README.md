@@ -20,7 +20,10 @@ Produksi: jalankan di belakang reverse proxy HTTPS (Caddy/Nginx), atau dengan `D
 | Adapter | Isi |
 |---|---|
 | `archive` (default) | Internet Archive, hanya item berlisensi domain publik (`licenseurl` = publicdomain). Video MP4 dan subtitle `.srt/.vtt` diambil langsung dari arsip. |
+| `lk21` | Scraper resmi LK21/NontonDrama, atau custom API yang di-set melalui `LK21_API_BASE_URL`. |
 | `file` | File JSON `{ "movies": [], "sections": [] }` yang dikurasi operator (`MOVIE_CATALOG_FILE`). Setiap item wajib punya `license`. |
+
+Saat Anda sudah menyiapkan server `lk21-api-master`, isi `LK21_API_BASE_URL` agar backend Bytify memakai endpoint custom itu sebagai sumber film. Format yang didukung adalah endpoint `GET /movies`, `/series`, `/popular/movies`, `/popular/series`, `/search/{query}`, dan detail per item. 
 
 Filter adapter `archive`:
 - Koleksi `feature_films_unsorted` dilewati.
@@ -28,7 +31,7 @@ Filter adapter `archive`:
 - Judul atau subjek yang mengandung kata di `MOVIE_BLOCKED_TERMS` dilewati.
 - ID di `MOVIE_BLOCKLIST` dilewati.
 
-Live TV membaca playlist M3U dari `LIVE_PLAYLIST_URLS`, baik URL HTTPS maupun path berkas lokal. Fitur ini hanya aktif bila `LIVE_SOURCE_RIGHTS_CONFIRMED=true` dan `LIVE_SOURCE_LICENSE_LABEL` terisi. Stream dicek berkala dengan permintaan GET+Range. Kanal HLS dianggap online hanya bila respons diawali `#EXTM3U`.
+Live TV membaca playlist M3U dari `LIVE_PLAYLIST_URLS`, baik URL HTTPS maupun path berkas lokal. Alternatifnya, Anda bisa memakai Xtream API dengan `LIVE_XTREAM_URL`, `LIVE_XTREAM_USERNAME`, dan `LIVE_XTREAM_PASSWORD`; backend akan membangun URL stream dari `player_api.php`. Fitur ini hanya aktif bila `LIVE_SOURCE_RIGHTS_CONFIRMED=true` dan `LIVE_SOURCE_LICENSE_LABEL` terisi. Stream dicek berkala dengan permintaan GET+Range. Kanal HLS dianggap online hanya bila respons diawali `#EXTM3U`.
 
 `test/fixtures/test-streams.m3u` **hanya untuk pengujian**. Isinya stream contoh publik dari Apple dan Mux, bukan kanal TV.
 

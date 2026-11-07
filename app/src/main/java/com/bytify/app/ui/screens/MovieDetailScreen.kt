@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,12 +23,12 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,7 +40,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.bytify.app.data.movie.Movie
 import com.bytify.app.ui.LocalBottomInset
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
@@ -71,6 +69,10 @@ fun MovieDetailScreen(movieId: String) {
             }
         }
         return
+    }
+
+    LaunchedEffect(item.id) {
+        repository.enrichIfNeeded(item)
     }
 
     val isFavorite = item.id in favoriteIds
@@ -128,7 +130,6 @@ fun MovieDetailScreen(movieId: String) {
             if (item.subtitles.isNotEmpty() || item.episodes.any { it.subtitles.isNotEmpty() }) AssistChip(onClick = {}, label = { Text("CC") })
         }
 
-        // Tombol putar utama di atas sinopsis agar mudah dijangkau.
         if (item.isPlayable) {
             Button(
                 onClick = {
@@ -213,19 +214,6 @@ fun MovieDetailScreen(movieId: String) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-
-        if (!item.isPlayable) {
-            Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Video belum tersedia", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Katalog ini belum menyediakan URL video. Trailer tetap bisa dibuka jika tersedia. Tambahkan sumber video yang memiliki izin distribusi pada backend katalog.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
         }
     }
 }

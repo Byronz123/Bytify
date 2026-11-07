@@ -26,7 +26,6 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -60,6 +59,7 @@ import com.bytify.app.ui.LocalBottomInset
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -76,6 +76,7 @@ fun MoviesScreen(embedded: Boolean = false) {
     var query by rememberSaveable { mutableStateOf("") }
     var selectedFilter by rememberSaveable { mutableStateOf("all") }
     var refreshing by remember { mutableStateOf(false) }
+    var searchingRemote by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
 
     fun refreshCatalog() {
@@ -100,6 +101,22 @@ fun MoviesScreen(embedded: Boolean = false) {
 
     LaunchedEffect(Unit) {
         if (repository.isCatalogConfigured) refreshCatalog()
+    }
+
+    // Pencarian otomatis ke server LK21 saat pengguna mengetik minimal 2 huruf
+    LaunchedEffect(query) {
+        val trimmed = query.trim()
+        if (trimmed.length >= 2 && repository.isCatalogConfigured) {
+            delay(450)
+            searchingRemote = true
+            try {
+                repository.searchRemoteAndCache(trimmed)
+            } finally {
+                searchingRemote = false
+            }
+        } else {
+            searchingRemote = false
+        }
     }
 
     val source = when (selectedFilter) {
@@ -132,7 +149,7 @@ fun MoviesScreen(embedded: Boolean = false) {
                 )
             }
             IconButton(onClick = ::refreshCatalog, enabled = !refreshing && repository.isCatalogConfigured) {
-                if (refreshing) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                if (refreshing || searchingRemote) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui katalog")
             }
         }
@@ -190,7 +207,7 @@ fun MoviesScreen(embedded: Boolean = false) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Backend katalog belum diatur", fontWeight = FontWeight.Bold)
                     Text(
-                        "Tambahkan movie.catalog.url=https://HOST/api/catalog.json ke local.properties, " +
+                        "Tambahkan movie.catalog.url=http://10.0.2.2:8787/api/catalog.json ke local.properties, " +
                             "lalu build ulang aplikasi.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -210,7 +227,7 @@ fun MoviesScreen(embedded: Boolean = false) {
             )
         }
 
-        if (refreshing && movies.isEmpty()) {
+        if ((refreshing || searchingRemote) && visibleMovies.isEmpty()) {
             Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = BytifyColors.GoldDeep)
             }
@@ -321,7 +338,6 @@ private fun MovieRow(
     }
 }
 
-/** Tampilan jelajah: lanjutkan menonton + rel poster per section katalog. */
 @Composable
 private fun MovieBrowse(
     movies: List<Movie>,
@@ -332,7 +348,6 @@ private fun MovieBrowse(
     onResume: (Movie, String?) -> Unit,
 ) {
     val byId = remember(movies) { movies.associateBy { it.id } }
-    // Riwayat episode disimpan dengan id episode; petakan kembali ke serialnya.
     val episodeOwner = remember(movies) {
         movies.filter { it.isSeries }.flatMap { s -> s.episodes.map { it.id to s } }.toMap()
     }

@@ -154,6 +154,9 @@ def normalize_to_movie_dto(item):
         "rating": rating,
         "language": item.get("language") or "id",
         "videoUrl": item.get("videoUrl"),
+        # Halaman sumber: dipakai aplikasi sebagai Referer saat memuat embed.
+        # Tanpa ini player videonode mengalihkan ke beranda situs sumber.
+        "sourceUrl": item.get("sourceUrl") or item.get("lk21_url"),
         "trailerUrl": item.get("trailerUrl"),
         "subtitles": item.get("subtitles") or [],
         "episodes": item.get("episodes") or [],

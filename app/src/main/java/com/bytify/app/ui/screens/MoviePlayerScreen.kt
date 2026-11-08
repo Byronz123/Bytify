@@ -123,12 +123,30 @@ private fun subtitleConfigs(subtitles: List<MovieSubtitleDto>) = subtitles.mapNo
 
 private fun isEmbedStreamUrl(url: String): Boolean {
     val lower = url.lowercase()
-    if (lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.contains(".m3u8?")) return false
+    // Direct media → selalu gunakan ExoPlayer
+    if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm") ||
+        lower.endsWith(".m3u8") || lower.contains(".m3u8?") ||
+        lower.contains("/hls/") || lower.contains("/master.m3u8")
+    ) return false
+
+    // Junk URL → biarkan ExoPlayer gagal, lalu tampilkan error
+    if (lower.contains("stopjudi") || lower.contains("donasi.assetsy") ||
+        lower.contains("judol") || lower.contains("slot-gacor") ||
+        lower.contains("anti-judi")
+    ) return false
+
+    // Embed player → gunakan WebView
     return lower.contains("/api/lk21/resolve/") ||
         lower.contains("embed") ||
+        lower.contains("videonode") ||
         lower.contains("hydrax") ||
         lower.contains("turbovid") ||
-        lower.contains("castlehoud")
+        lower.contains("castlehoud") ||
+        lower.contains("filemoon") ||
+        lower.contains("streamwish") ||
+        lower.contains("vidhide") ||
+        lower.contains("doodstream") ||
+        lower.contains("iframe")
 }
 
 @Composable
@@ -356,13 +374,97 @@ private fun EmbedVideoStage(
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
 ) {
+    // ---- Daftar domain iklan yang komprehensif ----
     val adDomains = remember {
-        listOf(
-            "doubleclick.net", "googlesyndication.com", "popads.net",
-            "popcash.net", "propellerads.com", "adsterra.com",
-            "exoclick.com", "juicyads.com", "onclickads.net", "histats.com"
+        setOf(
+            // Ad Networks
+            "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+            "google-analytics.com", "googletagmanager.com",
+            "popads.net", "popcash.net", "popunder.net",
+            "propellerads.com", "propellerclick.com",
+            "adsterra.com", "adsterratools.com",
+            "exoclick.com", "exosrv.com",
+            "juicyads.com", "onclickads.net",
+            "hilltopads.com", "hilltopads.net",
+            "clickadu.com", "vfrfrdc.com",
+            "trafficjunky.com", "trafficfactory.biz",
+            "a-ads.com", "adcash.com", "ad-maven.com",
+            "monetag.com", "outbrain.com", "taboola.com",
+            "revcontent.com", "mgid.com",
+            // Tracking
+            "histats.com", "statcounter.com", "hotjar.com",
+            "facebook.net", "scorecardresearch.com", "quantserve.com",
+            // Indonesian gambling/junk
+            "donasi.assetsy.de",
+            // Popup/redirect
+            "notifpush.com", "pushnotificationads.com",
+            "admaven.com",
         )
     }
+
+    // ---- JavaScript untuk membersihkan elemen pengganggu ----
+    val cleanupJs = remember {
+        """
+        (function() {
+            'use strict';
+            var sels = [
+                '[class*="popup"]','[class*="overlay"]','[class*="modal"]',
+                '[id*="popup"]','[id*="overlay"]','[id*="modal"]',
+                '[class*="banner"]','[class*="advert"]','[class*="sponsor"]',
+                '[id*="banner"]','[id*="advert"]','[id*="sponsor"]',
+                '[class*="stopjudi"]','[class*="anti-judi"]','[class*="judol"]',
+                '[id*="stopjudi"]','[id*="anti-judi"]','[id*="judol"]',
+                '.ads','.ad-container','.ad-wrapper','.ad-box',
+                '#ads','#ad-container','#ad-wrapper',
+                '[style*="position: fixed"][style*="z-index"]',
+                '[style*="position:fixed"][style*="z-index"]',
+                'iframe[src*="ads"]','iframe[src*="banner"]',
+                'iframe[src*="popup"]','iframe[src*="click"]'
+            ];
+            function clean() {
+                sels.forEach(function(s) {
+                    try {
+                        document.querySelectorAll(s).forEach(function(el) {
+                            if (el.tagName==='VIDEO'||el.id==='player'||
+                                el.classList.contains('video-js')||
+                                el.classList.contains('jwplayer')||
+                                el.classList.contains('plyr')) return;
+                            el.remove();
+                        });
+                    } catch(e) {}
+                });
+                document.querySelectorAll('*').forEach(function(el) {
+                    var st = window.getComputedStyle(el);
+                    if (st.position==='fixed' && parseInt(st.zIndex)>100 &&
+                        el.tagName!=='VIDEO' && !el.querySelector('video')) {
+                        el.style.display='none';
+                    }
+                });
+            }
+            window.open = function() { return null; };
+            document.addEventListener('click', function(e) {
+                var t = e.target;
+                while(t) {
+                    if (t.tagName==='VIDEO'||(t.classList&&(
+                        t.classList.contains('video-js')||
+                        t.classList.contains('jwplayer')||
+                        t.classList.contains('plyr')||
+                        t.classList.contains('vjs-control-bar')||
+                        t.id==='player'))) return;
+                    t = t.parentElement;
+                }
+            }, true);
+            var vids = document.querySelectorAll('video');
+            vids.forEach(function(v) {
+                v.style.width='100%'; v.style.height='100%';
+                v.style.objectFit='contain';
+            });
+            clean();
+            setInterval(function() { clean(); window.open=function(){return null;}; }, 2000);
+        })();
+        """.trimIndent()
+    }
+
     val boxMod = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
 
     Box(boxMod.background(Color.Black)) {
@@ -380,7 +482,9 @@ private fun EmbedVideoStage(
                         setSupportMultipleWindows(false)
                         javaScriptCanOpenWindowsAutomatically = false
                         userAgentString =
-                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        databaseEnabled = true
                     }
                     webChromeClient = object : WebChromeClient() {
                         override fun onCreateWindow(
@@ -398,6 +502,10 @@ private fun EmbedVideoStage(
                             val reqUrl = request?.url?.toString().orEmpty().lowercase()
                             if (adDomains.any { reqUrl.contains(it) }) return true
                             if (!reqUrl.startsWith("http://") && !reqUrl.startsWith("https://")) return true
+                            if (reqUrl.contains("stopjudi") || reqUrl.contains("judol") ||
+                                reqUrl.contains("slot-gacor") || reqUrl.contains("anti-judi") ||
+                                reqUrl.contains("donasi.assetsy")
+                            ) return true
                             return false
                         }
 
@@ -409,7 +517,22 @@ private fun EmbedVideoStage(
                             if (adDomains.any { reqUrl.contains(it) }) {
                                 return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
                             }
+                            if (reqUrl.contains("stopjudi") || reqUrl.contains("donasi.assetsy") ||
+                                reqUrl.contains("judol") || reqUrl.contains("anti-judi")
+                            ) {
+                                return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                            }
+                            if (reqUrl.contains("/ads/") || reqUrl.contains("/advert/") ||
+                                reqUrl.contains("/banner/") || reqUrl.contains("/popup/")
+                            ) {
+                                return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                            }
                             return super.shouldInterceptRequest(view, request)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            view?.evaluateJavascript(cleanupJs, null)
                         }
                     }
                     loadUrl(videoUrl)

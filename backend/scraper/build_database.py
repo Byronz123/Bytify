@@ -29,11 +29,53 @@ LINKS_FILE = os.path.join(BASE_DIR, "movie_links.txt")
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
 DB_FILE = os.path.join(DATA_DIR, "bytify_database.json")
 CATALOG_FILE = os.path.join(DATA_DIR, "catalog.json")  # Format MovieCatalogDto
+SUBTITLE_DIR = os.path.join(DATA_DIR, "subtitles")     # backend/data/subtitles/<slug>/<kode>.srt
 DIST_CATALOG = os.path.abspath(os.path.join(BASE_DIR, "..", "api", "dist", "api", "catalog.json"))
 
 MAX_WORKERS = int(os.environ.get("BYTIFY_WORKERS", "4") or 4)
+# Alamat publik tempat folder subtitles di-hosting. Tanpa ini, subtitle lokal
+# tetap didaftar memakai path relatif "subtitles/<slug>/<berkas>".
+SUBTITLE_BASE_URL = os.environ.get("BYTIFY_SUBTITLE_BASE", "").rstrip("/")
 SAVE_EVERY = 5
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+
+# Nama tampil untuk kode bahasa ISO-639-1 yang lazim dipakai subtitle.
+NAMA_BAHASA = {
+    "id": "Indonesia", "en": "English", "ms": "Melayu", "ar": "العربية",
+    "es": "Español", "pt": "Português", "fr": "Français", "de": "Deutsch",
+    "it": "Italiano", "nl": "Nederlands", "tr": "Türkçe", "ru": "Русский",
+    "ja": "日本語", "ko": "한국어", "zh": "中文", "th": "ไทย", "vi": "Tiếng Việt",
+    "hi": "हिन्दी", "tl": "Filipino", "pl": "Polski", "sv": "Svenska",
+}
+
+
+def subtitle_lokal(slug):
+    """
+    Baca subtitle dari backend/data/subtitles/<slug>/<kode-bahasa>.srt
+    Contoh: backend/data/subtitles/0187-ufo-2026/id.srt -> label "Indonesia".
+    Berkas .srt maupun .vtt sama-sama diterima; aplikasi menguraikan keduanya.
+    """
+    folder = os.path.join(SUBTITLE_DIR, slug)
+    if not os.path.isdir(folder):
+        return []
+    hasil = []
+    for berkas in sorted(os.listdir(folder)):
+        nama, ekstensi = os.path.splitext(berkas)
+        if ekstensi.lower() not in (".srt", ".vtt"):
+            continue
+        kode = nama.strip().lower()
+        # BYTIFY_SUBTITLE_BASE sudah menunjuk ke folder subtitles itu sendiri,
+        # jadi di belakangnya cukup <slug>/<berkas> agar tidak terduplikasi.
+        hasil.append({
+            "lang": kode,
+            "label": NAMA_BAHASA.get(kode, kode.upper()),
+            "url": (
+                f"{SUBTITLE_BASE_URL}/{slug}/{berkas}" if SUBTITLE_BASE_URL
+                else f"subtitles/{slug}/{berkas}"
+            ),
+        })
+    return hasil
+
 
 db_lock = threading.Lock()
 database = []
@@ -158,7 +200,7 @@ def normalize_to_movie_dto(item):
         # Tanpa ini player videonode mengalihkan ke beranda situs sumber.
         "sourceUrl": item.get("sourceUrl") or item.get("lk21_url"),
         "trailerUrl": item.get("trailerUrl"),
-        "subtitles": item.get("subtitles") or [],
+        "subtitles": item.get("subtitles") or subtitle_lokal(raw_id),
         "episodes": item.get("episodes") or [],
         "countries": item.get("countries") or [],
         "cast": item.get("cast") or [],

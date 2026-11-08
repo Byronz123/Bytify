@@ -77,6 +77,28 @@ def subtitle_lokal(slug):
     return hasil
 
 
+# Field yang benar-benar dibaca MovieDto di aplikasi Android. Sisanya
+# (cast, countries, directors, quality, resolution) tetap tersimpan utuh di
+# bytify_database.json, hanya tidak ikut dikirim ke perangkat agar katalog
+# yang diunduh ponsel tidak membengkak.
+FIELD_KATALOG = {
+    "id", "type", "title", "overview", "posterUrl", "backdropUrl",
+    "releaseYear", "durationMin", "genres", "rating", "language",
+    "videoUrl", "sourceUrl", "servers", "trailerUrl", "subtitles",
+    "episodes", "license",
+}
+
+
+def rampingkan_dto(dto):
+    """Sisakan field yang dipakai aplikasi dan buang nilai kosong.
+
+    Setiap field MovieDto punya nilai bawaan, jadi field yang hilang
+    diperlakukan sama dengan field bernilai kosong oleh aplikasi.
+    """
+    return {k: v for k, v in dto.items()
+            if k in FIELD_KATALOG and v not in (None, "", [], {})}
+
+
 db_lock = threading.Lock()
 database = []
 existing_urls = set()
@@ -221,6 +243,10 @@ def build_catalog_json(movies):
         if m.get("releaseYear"):
             year_buckets.setdefault(m["releaseYear"], []).append(m["id"])
 
+    # Situs sumber sesekali menulis tahun yang mustahil (mis. 2038); kalau
+    # dipakai, seksi "Film Terbaru" jadi salah. Batasi ke tahun berjalan.
+    tahun_wajar = time.gmtime().tm_year + 1
+    year_buckets = {t: v for t, v in year_buckets.items() if t <= tahun_wajar}
     if year_buckets:
         latest = max(year_buckets)
         sections.append({"title": f"Film Terbaru {latest}", "movieIds": year_buckets[latest][:20]})
@@ -239,10 +265,15 @@ def build_catalog_json(movies):
 # PENYIMPANAN
 # ============================================================
 
-def _atomic_write(path, payload):
+def _atomic_write(path, payload, padat=False):
+    """padat=True menulis tanpa indentasi; dipakai untuk berkas yang diunduh
+    perangkat, karena spasi indentasi saja memakan sekitar 5 MB."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as out:
-        json.dump(payload, out, indent=2, ensure_ascii=False)
+        if padat:
+            json.dump(payload, out, ensure_ascii=False, separators=(",", ":"))
+        else:
+            json.dump(payload, out, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
 
 
@@ -250,7 +281,8 @@ def save_db_safely():
     """Simpan database (array, dibaca API Node), catalog.json, dan salinan dist bila ada."""
     os.makedirs(DATA_DIR, exist_ok=True)
     _atomic_write(DB_FILE, database)
-    _atomic_write(CATALOG_FILE, build_catalog_json([normalize_to_movie_dto(i) for i in database]))
+    dto = [rampingkan_dto(normalize_to_movie_dto(i)) for i in database]
+    _atomic_write(CATALOG_FILE, build_catalog_json(dto), padat=True)
 
     if os.path.isdir(os.path.dirname(DIST_CATALOG)):
         try:
@@ -259,7 +291,7 @@ def save_db_safely():
                 "updatedAt": int(time.time() * 1000),
                 "total": len(database),
                 "items": database,
-            })
+            }, padat=True)
         except Exception as e:
             print(f"[WARN] Gagal menyinkronkan ke dist/api/catalog.json: {e}")
 

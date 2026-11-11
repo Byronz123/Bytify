@@ -1,0 +1,47 @@
+name: Deploy katalog ke Cloudflare Pages
+
+# Menerbitkan backend/data/catalog.json apa adanya ke bytify-api.pages.dev.
+# Jalankan manual lewat tab Actions, atau otomatis saat katalog/pipeline berubah.
+#
+# Sebelum dipakai, tambahkan dua secret di repo
+# (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   token dengan izin "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  id akun Cloudflare
+# Secret hanya dibaca GitHub saat workflow berjalan.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feature/complete-1.3.0]
+    paths:
+      - backend/data/catalog.json
+      - backend/data/live_tv_database.json
+      - backend/api/**
+      - functions/**
+      - .github/workflows/deploy-pages.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Bangun keluaran Pages
+        run: node backend/api/scripts/build-pages.mjs backend/api/dist
+
+      - name: Uji kontrak katalog
+        # Menjaga agar yang terbit selalu punya sections dan jumlah film yang
+        # sama persis dengan backend/data/catalog.json — cacat yang dulu membuat
+        # katalog live kehilangan seluruh sections dan daftar server.
+        run: node --test backend/api/test/build-pages.test.mjs
+
+      - name: Terbitkan ke Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy backend/api/dist --project-name=bytify-api

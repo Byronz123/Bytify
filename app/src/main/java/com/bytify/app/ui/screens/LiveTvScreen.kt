@@ -327,7 +327,7 @@ private fun LiveChannelRow(
     onFavorite: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = channel.isCurrentlyAvailable(nowEpochMs), onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
     ) {
         Row(

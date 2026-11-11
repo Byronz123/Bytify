@@ -4,7 +4,9 @@ import com.bytify.app.data.db.BytifyDao
 import com.bytify.app.data.db.MovieEntity
 import com.bytify.app.data.db.MovieFavoriteEntity
 import com.bytify.app.data.db.MovieSectionEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -23,8 +25,14 @@ class MovieRepository(
 ) {
     val isCatalogConfigured: Boolean get() = api.isConfigured
 
-    val movies: Flow<List<Movie>> = dao.movies().map { rows -> rows.map { it.toMovie(json) } }
-    val favoriteMovies: Flow<List<Movie>> = dao.favoriteMovies().map { rows -> rows.map { it.toMovie(json) } }
+    // Pemetaan 10.000+ baris (parse serversJson tiap film) dipindah ke Default
+    // agar tidak memblokir main thread saat sinkron katalog / toggle favorit.
+    val movies: Flow<List<Movie>> = dao.movies()
+        .map { rows -> rows.map { it.toMovie(json) } }
+        .flowOn(Dispatchers.Default)
+    val favoriteMovies: Flow<List<Movie>> = dao.favoriteMovies()
+        .map { rows -> rows.map { it.toMovie(json) } }
+        .flowOn(Dispatchers.Default)
     val favoriteIds: Flow<Set<String>> = dao.movieFavoriteIds().map { it.toSet() }
     val sections: Flow<List<MovieSection>> = dao.movieSections().map { rows ->
         rows.map { row ->
@@ -33,12 +41,13 @@ class MovieRepository(
                 movieIds = runCatching { json.decodeFromString<List<String>>(row.movieIdsJson) }.getOrDefault(emptyList()),
             )
         }
-    }
+    }.flowOn(Dispatchers.Default)
 
     fun movie(id: String): Flow<Movie?> = dao.movie(id).map { it?.toMovie(json) }
 
     fun search(query: String): Flow<List<Movie>> = dao.searchMovies(query.trim())
         .map { rows -> rows.map { it.toMovie(json) } }
+        .flowOn(Dispatchers.Default)
 
     /**
      * Segarkan katalog hanya bila sudah lebih tua dari [maksimalUsiaMs].

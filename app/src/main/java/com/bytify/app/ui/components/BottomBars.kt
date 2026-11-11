@@ -5,6 +5,8 @@ import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import kotlin.math.roundToInt
@@ -22,8 +24,12 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -201,8 +207,17 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
     val target = bounds[currentRoute]
     var previousLeft by remember { mutableFloatStateOf(target?.first ?: 0f) }
     val movingRight = (target?.first ?: 0f) >= previousLeft
-    val lead = spring<Float>(dampingRatio = 0.72f, stiffness = 700f)
-    val trail = spring<Float>(dampingRatio = 0.8f, stiffness = 240f)
+    // Tepi depan menyentak lebih dulu, tepi belakang menyusul: itu yang membuat
+    // kapsul memanjang lalu mengerut seperti cairan. Tepi belakang dinaikkan dari
+    // 240 ke 380 supaya regangannya tetap terlihat tapi cepat mapan — bukan
+    // molor berkepanjangan yang membuat perpindahan terasa berat.
+    val lead = spring<Float>(dampingRatio = 0.75f, stiffness = 900f)
+    val trail = spring<Float>(dampingRatio = 0.85f, stiffness = 380f)
+    // Label memakai spec yang sama agar lebar tab berubah seirama kapsul. Tanpa
+    // ini lebar item beranimasi sendiri, sehingga batas tab bergeser selagi
+    // kapsul terbang dan kapsul mengejar sasaran yang belum diam (goyang).
+    val labelSpec = spring<IntSize>(dampingRatio = 0.85f, stiffness = 700f)
+    val labelFade = spring<Float>(dampingRatio = 1f, stiffness = 800f)
     val left by animateFloatAsState(target?.first ?: 0f, if (movingRight) trail else lead, label = "navLeft")
     val right by animateFloatAsState(target?.second ?: 0f, if (movingRight) lead else trail, label = "navRight")
     LaunchedEffect(target?.first) { target?.first?.let { previousLeft = it } }
@@ -231,13 +246,20 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { dragX = it.x },
-                        onDragEnd = { dragX = null },
+                        // Perpindahan tab dilakukan saat jari DILEPAS, bukan selagi
+                        // digeser. Selama digeser kapsul hanya mengikuti jari, jadi
+                        // navigasi tidak terpicu berkali-kali dalam satu geseran —
+                        // itu yang dulu membuat layar berganti sebelum dilepas dan
+                        // animasinya terasa berat.
+                        onDragEnd = {
+                            dragX?.let { x -> nearest(x)?.let { if (it != route) select(it) } }
+                            dragX = null
+                        },
                         onDragCancel = { dragX = null },
                     ) { change, amount ->
                         change.consume()
                         val x = ((dragX ?: change.position.x) + amount).coerceIn(0f, rowWidth)
                         dragX = x
-                        nearest(x)?.let { if (it != route) select(it) }
                     }
                 },
         ) {
@@ -264,6 +286,16 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
                         if (selected) BytifyColors.Navy else MaterialTheme.colorScheme.onSurfaceVariant,
                         label = "navContent",
                     )
+                    // Umpan balik sentuhan: ikon mengecil sedikit selama ditekan
+                    // lalu memantul kembali, jadi tab terasa hidup dan menjawab
+                    // sentuhan meski perpindahannya baru terjadi saat dilepas.
+                    val interaksi = remember { MutableInteractionSource() }
+                    val ditekan by interaksi.collectIsPressedAsState()
+                    val skala by animateFloatAsState(
+                        if (ditekan) 0.90f else 1f,
+                        spring(dampingRatio = 0.55f, stiffness = 900f),
+                        label = "navPress",
+                    )
                     Row(
                         Modifier
                             .onGloballyPositioned { c ->
@@ -271,12 +303,29 @@ fun FloatingNavBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: 
                                 bounds[item.route] = x to x + c.size.width
                             }
                             .clip(CircleShape)
-                            .clickable { onSelect(item.route) }
+                            .clickable(
+                                interactionSource = interaksi,
+                                // Riak bawaan ditiadakan: kapsul gold dan pantulan
+                                // skala sudah menjadi umpan baliknya, seperti di rujukan.
+                                indication = null,
+                            ) { onSelect(item.route) }
                             .padding(horizontal = 18.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(if (selected) item.selectedIcon else item.icon, item.label, tint = content)
-                        AnimatedVisibility(selected, enter = expandHorizontally(), exit = shrinkHorizontally()) {
+                        Icon(
+                            if (selected) item.selectedIcon else item.icon,
+                            item.label,
+                            tint = content,
+                            modifier = Modifier.graphicsLayer { scaleX = skala; scaleY = skala },
+                        )
+                        // Label melebar sekaligus melarut, bukan muncul mendadak:
+                        // saat berpindah, label lama memudar sementara label baru
+                        // menguat — persis gerak pada video rujukan.
+                        AnimatedVisibility(
+                            selected,
+                            enter = expandHorizontally(animationSpec = labelSpec) + fadeIn(animationSpec = labelFade),
+                            exit = shrinkHorizontally(animationSpec = labelSpec) + fadeOut(animationSpec = labelFade),
+                        ) {
                             Text(
                                 item.label,
                                 style = MaterialTheme.typography.labelLarge,

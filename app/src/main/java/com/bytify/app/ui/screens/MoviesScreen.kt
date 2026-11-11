@@ -409,7 +409,10 @@ private fun MovieBrowse(
             }
         }
         items(sections, key = { "section:" + it.title }) { section ->
-            val list = section.movieIds.mapNotNull(byId::get)
+            // Bagian terbesar berisi 834 id. Tanpa remember, daftar Movie-nya
+            // dibangun ulang pada SETIAP recomposition untuk tiap bagian yang
+            // terlihat — ribuan pencarian peta per frame saat animasi berjalan.
+            val list = remember(section, byId) { section.movieIds.mapNotNull(byId::get) }
             if (list.isNotEmpty()) {
                 RailTitle(section.title)
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

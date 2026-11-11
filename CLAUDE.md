@@ -26,7 +26,9 @@ backend/scraper/auto_sync_daemon.py    crawl -> build -> scrape TV, berulang
 backend/scraper/update_bytify.bat      pembungkus daemon di atas
 backend/scraper/movie_links.txt        sumber daftar URL film
 
-backend/data/bytify_database.json      hasil scraping mentah (~27 MB, 10.019 film)
+backend/data/bytify_database.json      hasil scraping mentah (~28 MB); TIDAK dilacak
+                                       git, dihasilkan scraper, cadangan di
+                                       E:\Portofolio\Karya\bytify-cadangan\
 backend/data/catalog.json              yang diunduh APK (~12,4 MB; ~2,8 MB terkompresi)
 
 backend/api/                           API Node (server.mjs, src/movies.mjs, src/live.mjs)

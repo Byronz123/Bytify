@@ -11,6 +11,9 @@ local.properties
 __pycache__/
 *.pyc
 
+# Hasil scraping mentah (~28 MB); dihasilkan scraper, cadangan di luar repo
+backend/data/bytify_database.json
+
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/
 keystore.properties

@@ -7,6 +7,10 @@ local.properties
 *.iml
 .kotlin/
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/
 keystore.properties

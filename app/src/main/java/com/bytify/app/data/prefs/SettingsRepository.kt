@@ -32,6 +32,8 @@ data class Settings(
     val togetherName: String = "",
     val autoCheckUpdates: Boolean = true,
     val lastUpdateCheck: Long = 0,
+    /** Kapan panen katalog lagu terakhir kali benar-benar TUNTAS (bukan terputus). */
+    val katalogLaguSelesai: Long = 0,
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
 )
@@ -49,6 +51,7 @@ class SettingsRepository(private val context: Context) {
         val togetherName = stringPreferencesKey("together_name")
         val autoCheckUpdates = booleanPreferencesKey("auto_check_updates")
         val lastUpdateCheck = longPreferencesKey("last_update_check")
+        val katalogLaguSelesai = longPreferencesKey("katalog_lagu_selesai")
         val eqEnabled = booleanPreferencesKey("eq_enabled")
         val eqPreset = intPreferencesKey("eq_preset")
         val eqBands = stringPreferencesKey("eq_bands")
@@ -69,6 +72,7 @@ class SettingsRepository(private val context: Context) {
         togetherName = this[Keys.togetherName].orEmpty(),
         autoCheckUpdates = this[Keys.autoCheckUpdates] ?: true,
         lastUpdateCheck = this[Keys.lastUpdateCheck] ?: 0,
+        katalogLaguSelesai = this[Keys.katalogLaguSelesai] ?: 0,
         equalizer = EqualizerSettings(
             enabled = this[Keys.eqEnabled] ?: false,
             preset = this[Keys.eqPreset] ?: -1,
@@ -88,6 +92,10 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTogetherName(value: String) = context.dataStore.edit { it[Keys.togetherName] = value.trim() }
     suspend fun setAutoCheckUpdates(value: Boolean) = context.dataStore.edit { it[Keys.autoCheckUpdates] = value }
     suspend fun markUpdateChecked() = context.dataStore.edit { it[Keys.lastUpdateCheck] = System.currentTimeMillis() }
+
+    /** Ditandai hanya saat panen katalog selesai seluruhnya. */
+    suspend fun tandaiKatalogLaguSelesai() =
+        context.dataStore.edit { it[Keys.katalogLaguSelesai] = System.currentTimeMillis() }
 
     suspend fun setEqualizerEnabled(value: Boolean) = context.dataStore.edit { it[Keys.eqEnabled] = value }
 

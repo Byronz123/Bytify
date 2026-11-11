@@ -83,6 +83,30 @@ interface BytifyDao {
     )
     fun recentSongs(limit: Int): Flow<List<SongEntity>>
 
+    // ---------- Katalog lagu (kandidat rekomendasi) ----------
+    @Upsert
+    suspend fun upsertCatalogSongs(rows: List<CatalogSongEntity>)
+
+    /**
+     * Menyimpan hanya lagu yang kuncinya belum ada. Dipakai sumber pelengkap
+     * (YouTube/Spotify) supaya tidak menimpa peringkat populer dari Apple.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCatalogSongsIfAbsent(rows: List<CatalogSongEntity>)
+
+    @Query("SELECT * FROM catalog_songs ORDER BY rank ASC")
+    fun catalogSongs(): Flow<List<CatalogSongEntity>>
+
+    @Query("SELECT COUNT(*) FROM catalog_songs")
+    suspend fun catalogSongCount(): Int
+
+    @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM catalog_songs")
+    suspend fun lastCatalogSongSync(): Long
+
+    /** Id lagu yang baru diputar, untuk menekan pengulangan di rekomendasi. */
+    @Query("SELECT DISTINCT songId FROM play_events ORDER BY timestamp DESC LIMIT :limit")
+    fun recentlyPlayedIds(limit: Int): Flow<List<String>>
+
     // ---------- Statistik ----------
     @Query(
         """SELECT s.*, COUNT(e.id) AS plays, SUM(e.playTimeMs) AS totalMs

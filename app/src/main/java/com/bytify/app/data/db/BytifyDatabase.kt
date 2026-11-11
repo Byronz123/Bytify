@@ -24,8 +24,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MovieSectionEntity::class,
         LiveChannelEntity::class,
         LiveFavoriteEntity::class,
+        CatalogSongEntity::class,
     ],
-    version = 8,
+    version = 10,
     exportSchema = true,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
@@ -141,9 +142,54 @@ abstract class BytifyDatabase : RoomDatabase() {
             }
         }
 
+        /** Migrasi aditif: tabel katalog lagu sebagai kandidat rekomendasi. */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `catalog_songs` (
+                       `id` TEXT NOT NULL,
+                       `title` TEXT NOT NULL,
+                       `artist` TEXT NOT NULL,
+                       `artistKey` TEXT NOT NULL,
+                       `thumbnailUrl` TEXT,
+                       `rank` INTEGER NOT NULL,
+                       `updatedAt` INTEGER NOT NULL,
+                       PRIMARY KEY(`id`))""",
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_songs_artistKey` ON `catalog_songs` (`artistKey`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_songs_rank` ON `catalog_songs` (`rank`)")
+            }
+        }
+
+        /**
+         * Katalog lagu beralih ke kunci anti-duplikat "judul|artis" agar satu
+         * lagu dari beberapa sumber tidak tersimpan ganda. Tabel ini murni
+         * cache turunan, jadi aman dibuat ulang — isinya dipanen lagi.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("DROP TABLE IF EXISTS `catalog_songs`")
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `catalog_songs` (
+                       `kunci` TEXT NOT NULL,
+                       `id` TEXT NOT NULL,
+                       `title` TEXT NOT NULL,
+                       `artist` TEXT NOT NULL,
+                       `artistKey` TEXT NOT NULL,
+                       `thumbnailUrl` TEXT,
+                       `rank` INTEGER NOT NULL,
+                       `sumber` TEXT NOT NULL,
+                       `updatedAt` INTEGER NOT NULL,
+                       PRIMARY KEY(`kunci`))""",
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_songs_artistKey` ON `catalog_songs` (`artistKey`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_songs_rank` ON `catalog_songs` (`rank`)")
+            }
+        }
+
         fun create(context: Context): BytifyDatabase =
             Room.databaseBuilder(context, BytifyDatabase::class.java, "bytify.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .build()
     }
 }

@@ -31,7 +31,12 @@ import com.bytify.app.data.model.Song
 import com.bytify.app.data.prefs.SettingsRepository
 import com.bytify.app.data.together.ListenTogether
 import com.bytify.app.data.update.UpdateRepository
+import com.bytify.app.data.music.KATALOG_LAGU_MASIH_SEGAR
+import com.bytify.app.data.music.MusicCatalogRepository
+import com.bytify.app.data.music.USIA_KATALOG_LAGU_MS
+import com.bytify.app.data.remote.Album
 import com.bytify.app.data.remote.ChartsRepository
+import com.bytify.app.data.remote.USIA_TANGGA_DEFAULT_MS
 import com.bytify.app.data.remote.ImportRepository
 import com.bytify.app.data.remote.LyricsRepository
 import com.bytify.app.data.remote.TranslateRepository
@@ -74,6 +79,7 @@ class AppContainer(context: Context) {
     val settings = SettingsRepository(appContext)
     val youtube = YouTubeRepository()
     val charts = ChartsRepository(okHttp, json)
+    val musicCatalog = MusicCatalogRepository(database.dao(), charts, youtube, settings)
     val lyrics = LyricsRepository(okHttp, json)
     val translator = TranslateRepository(okHttp, json)
     val importer = ImportRepository(okHttp, json, youtube, library)
@@ -89,6 +95,17 @@ class AppContainer(context: Context) {
 
     /** Lagu yang sedang diputar, dibagikan ke widget & Dynamic Island. */
     val nowPlaying = MutableStateFlow(NowPlaying())
+
+    /**
+     * Tangga lagu terkini (Indonesia & global), diisi oleh [autoSyncTanggaLagu]
+     * dan diamati HomeScreen sehingga lagu terbaru muncul otomatis — pola sama
+     * dengan katalog film yang disinkron sendiri lalu diamati lewat Flow.
+     */
+    val tanggaLaguId = MutableStateFlow<List<Song>>(emptyList())
+    val tanggaLaguGlobal = MutableStateFlow<List<Song>>(emptyList())
+
+    /** Album terpopuler untuk bagian "Album populer" di Beranda. */
+    val albumPopuler = MutableStateFlow<List<Album>>(emptyList())
 
     /** Cache audio: lagu yang pernah diputar tidak perlu diunduh ulang. */
     val songCache: SimpleCache by lazy {
@@ -148,7 +165,7 @@ class AppContainer(context: Context) {
         RoutingDataSource.Factory(music, direct)
     }
 
-    val player = PlayerConnection(appContext, appScope, youtube, settings)
+    val player = PlayerConnection(appContext, appScope, youtube, settings) { seed -> musicCatalog.lanjutan(seed) }
 
     /** Dengar Bareng lewat Supabase Realtime (URL & kunci dari local.properties). */
     val together by lazy {
@@ -158,6 +175,68 @@ class AppContainer(context: Context) {
     init {
         autoDownloadLikedSongs()
         autoSyncKatalogFilm()
+        autoSyncTanggaLagu()
+        autoSyncKatalogLagu()
+    }
+
+    /**
+     * Katalog lagu dipanen dari tangga banyak negara sekali sehari. Berjalan di
+     * latar belakang dan tahan gagal: negara yang menolak dilewati, hasilnya
+     * menumpuk di Room sehingga katalog makin lengkap tiap putaran.
+     */
+    private fun autoSyncKatalogLagu() {
+        appScope.launch {
+            // Beri jalan dulu ke sinkron tangga lagu yang mengisi layar Beranda.
+            // Tanpa jeda ini keduanya menghantam Apple RSS bersamaan dan tangga
+            // yang terlihat pengguna bisa ditolak (HTTP 502).
+            delay(JEDA_AWAL_KATALOG_LAGU_MS)
+            while (true) {
+                runCatching { musicCatalog.syncIfStale() }
+                    .onSuccess { jumlah ->
+                        if (jumlah != KATALOG_LAGU_MASIH_SEGAR) {
+                            Log.i("BytifyKatalogLagu", "katalog lagu disegarkan: $jumlah judul terkumpul")
+                        }
+                    }
+                    .onFailure { Log.w("BytifyKatalogLagu", "sinkron katalog lagu gagal: ${it.message}") }
+                delay(USIA_KATALOG_LAGU_MS)
+            }
+        }
+    }
+
+    /**
+     * Tangga lagu diperbarui sendiri: sekali saat aplikasi dijalankan, lalu
+     * berkala selama aplikasi hidup. Cache ber-TTL di ChartsRepository membuat
+     * unduhan hanya terjadi bila sudah usang, jadi parity dengan katalog film.
+     */
+    private fun autoSyncTanggaLagu() {
+        appScope.launch {
+            while (true) {
+                segarkanTanggaLagu(paksa = false)
+                delay(USIA_TANGGA_DEFAULT_MS)
+            }
+        }
+    }
+
+    /**
+     * Isi [tanggaLaguId] & [tanggaLaguGlobal] dari sumber. Dengan [paksa] cache
+     * dikosongkan lebih dulu agar benar-benar menarik ulang (dipakai tarik-segarkan).
+     * Gagal jaringan hanya dicatat, tidak membuat aplikasi berhenti.
+     */
+    suspend fun segarkanTanggaLagu(paksa: Boolean) {
+        if (paksa) charts.clearCache()
+        runCatching { charts.topSongs("id") }
+            .onSuccess { tanggaLaguId.value = it }
+            .onFailure { Log.w("BytifyTangga", "tangga lagu Indonesia gagal: ${it.message}") }
+        runCatching { charts.topSongs("us") }
+            .onSuccess { tanggaLaguGlobal.value = it }
+            .onFailure { Log.w("BytifyTangga", "tangga lagu global gagal: ${it.message}") }
+        runCatching { charts.topAlbums("id") }
+            .onSuccess { albumPopuler.value = it }
+            .onFailure { Log.w("BytifyTangga", "album populer gagal: ${it.message}") }
+        Log.i(
+            "BytifyTangga",
+            "tangga lagu: ${tanggaLaguId.value.size} id / ${tanggaLaguGlobal.value.size} global / ${albumPopuler.value.size} album",
+        )
     }
 
     /**
@@ -209,6 +288,9 @@ class AppContainer(context: Context) {
     }
 
     companion object {
+        /** Jeda sebelum panen katalog lagu, agar tidak menabrak sinkron tangga. */
+        const val JEDA_AWAL_KATALOG_LAGU_MS = 45_000L
+
         const val SONG_CACHE_BYTES = 512L * 1024 * 1024
     }
 }

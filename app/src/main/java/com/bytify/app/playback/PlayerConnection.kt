@@ -50,6 +50,12 @@ class PlayerConnection(
     private val scope: CoroutineScope,
     private val youtube: YouTubeRepository,
     private val settings: SettingsRepository,
+    /**
+     * Pemasok lagu lanjutan berbasis selera, dipakai bila YouTube "related"
+     * tidak tersedia. Dibuat berupa fungsi agar pemutar tidak perlu tahu
+     * soal katalog maupun Room.
+     */
+    private val lanjutanSelera: suspend (Song) -> List<Song> = { emptyList() },
 ) {
     private var controller: MediaController? = null
 
@@ -203,39 +209,54 @@ class PlayerConnection(
         _sleepTimer.value = SleepTimer.EndOfSong
     }
 
+    /**
+     * Cari lagu penyambung antrean. YouTube "related" dipakai lebih dulu karena
+     * paling nyambung secara musikal, tetapi lagu dari tangga Apple id-nya masih
+     * berupa kueri pencarian sehingga tidak punya "related" — dulu autoplay
+     * diam saja untuk lagu-lagu itu. Sekarang jatuh ke mesin selera, jadi
+     * lanjutannya tetap menyesuaikan kebiasaan dengar pengguna.
+     */
+    private suspend fun laguPenyambung(seed: Song): List<Song> {
+        val related = if (seed.id.startsWith(Song.SEARCH_PREFIX)) {
+            emptyList()
+        } else {
+            runCatching { youtube.related(seed.id) }.getOrDefault(emptyList())
+        }
+        if (related.isNotEmpty()) return related
+        return runCatching { lanjutanSelera(seed) }.getOrDefault(emptyList())
+    }
+
     /** Isi antrean dengan lagu-lagu terkait (gaya "radio"). */
     private fun startRadio(seed: Song) {
-        if (seed.id.startsWith(Song.SEARCH_PREFIX)) return
         scope.launch {
             if (!settings.settings.first().autoRadio) return@launch
             radioSeedId = seed.id
-            val related = runCatching { youtube.related(seed.id) }.getOrDefault(emptyList())
+            val sambungan = laguPenyambung(seed)
             val c = controller ?: return@launch
             if (radioSeedId != seed.id) return@launch
             val existing = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }.toSet()
-            c.addMediaItems(related.filter { it.id !in existing }.take(RADIO_SIZE).map { it.toMediaItem() })
+            c.addMediaItems(sambungan.filter { it.id !in existing }.take(RADIO_SIZE).map { it.toMediaItem() })
         }
     }
 
-    /** Saat antrean hampir habis, tambahkan lagu terkait otomatis. */
+    /** Saat antrean hampir habis, tambahkan lagu lanjutan otomatis. */
     private fun maybeLoadMore() {
         val c = controller ?: return
         if (loadingMore || c.repeatMode != Player.REPEAT_MODE_OFF) return
         if (c.currentMediaItemIndex < c.mediaItemCount - 1) return
         val currentItem = c.currentMediaItem ?: return
-        if (!Song.fromMediaItem(currentItem).isMusic) return
-        val current = currentItem.mediaId
-        if (current.startsWith(Song.SEARCH_PREFIX)) return
+        val currentSong = Song.fromMediaItem(currentItem)
+        if (!currentSong.isMusic) return
         loadingMore = true
         scope.launch {
             try {
                 if (!settings.settings.first().autoRadio) return@launch
-                val related = runCatching { youtube.related(current) }.getOrDefault(emptyList())
+                val sambungan = laguPenyambung(currentSong)
                 val controllerNow = controller ?: return@launch
                 val existing = (0 until controllerNow.mediaItemCount)
                     .map { controllerNow.getMediaItemAt(it).mediaId }.toSet()
                 controllerNow.addMediaItems(
-                    related.filter { it.id !in existing }.take(RADIO_SIZE).map { it.toMediaItem() },
+                    sambungan.filter { it.id !in existing }.take(RADIO_SIZE).map { it.toMediaItem() },
                 )
             } finally {
                 loadingMore = false

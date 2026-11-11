@@ -32,6 +32,39 @@ data class SongEntity(
     )
 }
 
+/**
+ * Katalog lagu: kumpulan lagu dari tangga Apple Music banyak negara, dipakai
+ * sebagai kumpulan kandidat untuk rekomendasi. Terpisah dari tabel `songs`
+ * (yang hanya berisi lagu yang pernah disentuh pengguna) supaya statistik dan
+ * daftar suka tidak tercemar ribuan baris katalog.
+ *
+ * [id] memakai skema yang sama dengan [Song.pending] ("search:Judul - Artis"),
+ * jadi lagu katalog dan lagu di riwayat putar punya id identik.
+ */
+@Entity(tableName = "catalog_songs", indices = [Index("artistKey"), Index("rank")])
+data class CatalogSongEntity(
+    /**
+     * Kunci anti-duplikat "judul|artis" yang sudah dinormalkan. Dipakai sebagai
+     * kunci utama agar satu lagu yang datang dari beberapa sumber (tangga Apple
+     * dan pencarian YouTube) hanya tersimpan sekali.
+     */
+    @PrimaryKey val kunci: String,
+    /** Id yang diputar: "search:Judul - Artis" (Apple) atau id video YouTube. */
+    val id: String,
+    val title: String,
+    val artist: String,
+    /** Artis utama yang sudah dinormalkan, untuk mencocokkan selera. */
+    val artistKey: String,
+    val thumbnailUrl: String?,
+    /** Peringkat terbaik di tangga mana pun (1 = puncak): sinyal popularitas. */
+    val rank: Int,
+    /** Asal data: `apple` (tangga) atau `youtube` (pencarian). */
+    val sumber: String,
+    val updatedAt: Long,
+) {
+    fun toSong() = Song(id = id, title = title, artist = artist, thumbnailUrl = thumbnailUrl)
+}
+
 /** Stasiun radio yang disimpan pengguna. */
 @Entity(tableName = "radio_favorites")
 data class RadioFavoriteEntity(

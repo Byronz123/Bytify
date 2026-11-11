@@ -649,6 +649,15 @@ def scrape_with_driver(driver, target_url):
 
     meta = extract_metadata(soup, target_url)
     data["title"] = meta["title"] or data["title"]
+
+    # Penjaga halaman-antara: LK21 kadang menyajikan interstisial
+    # "Anda akan dialihkan ke Lk21 Nontondrama dalam N detik" alih-alih halaman
+    # film. Tanpa server/metadata, entri ini tak dapat diputar — lewati agar
+    # tidak mencemari katalog (sumber 58 entri sampah sebelumnya).
+    if data["title"].strip().lower().startswith("anda akan dialihkan"):
+        print(f"    [SKIP] Halaman antara Nontondrama terdeteksi: {target_url}")
+        return None
+
     data["overview"] = meta["overview"]
     data["posterUrl"] = meta["poster_url"]
     data["backdropUrl"] = meta["backdrop_url"]

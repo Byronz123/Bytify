@@ -12,6 +12,7 @@
 #   CHROME_VERSION  paksa versi mayor Chrome jika deteksi otomatis gagal
 # ==========================================
 import os
+import re
 import sys
 import json
 import time
@@ -29,6 +30,7 @@ LINKS_FILE = os.path.join(BASE_DIR, "movie_links.txt")
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
 DB_FILE = os.path.join(DATA_DIR, "bytify_database.json")
 CATALOG_FILE = os.path.join(DATA_DIR, "catalog.json")  # Format MovieCatalogDto
+REDIRECT_FILE = os.path.join(DATA_DIR, "redirect-nontondrama.txt")  # id halaman-antara
 SUBTITLE_DIR = os.path.join(DATA_DIR, "subtitles")     # backend/data/subtitles/<slug>/<kode>.srt
 DIST_CATALOG = os.path.abspath(os.path.join(BASE_DIR, "..", "api", "dist", "api", "catalog.json"))
 
@@ -187,6 +189,45 @@ def clean_existing_database(db):
     return sum(to_api_record(item) for item in db)
 
 
+TAHUN_MIN = 1900
+_YEAR_FIX_COUNT = [0]  # dihitung ulang tiap save_db_safely()
+
+
+def tahun_maksimum_wajar():
+    # Situs sumber sesekali menulis tahun mustahil (mis. 2038). Batas atas =
+    # tahun berjalan + 1 agar rilis awal tahun depan tetap lolos.
+    return time.gmtime().tm_year + 1
+
+
+def koreksi_tahun(raw_year, title, raw_id):
+    """Perbaiki akar, bukan menjepit: kalau releaseYear di luar
+    1900..(tahun_sekarang+1), ambil tahun dari judul '(YYYY)' atau ekor slug.
+    Mengembalikan int atau None; menaikkan _YEAR_FIX_COUNT bila berubah."""
+    maks = tahun_maksimum_wajar()
+    try:
+        y = int(raw_year) if raw_year not in (None, "", "N/A") else None
+    except (TypeError, ValueError):
+        y = None
+    if y is not None and TAHUN_MIN <= y <= maks:
+        return y
+    for sumber in (title, raw_id):
+        for m in re.findall(r"(?:19|20)\d{2}", str(sumber or "")):
+            yy = int(m)
+            if TAHUN_MIN <= yy <= maks:
+                if yy != y:
+                    _YEAR_FIX_COUNT[0] += 1
+                return yy
+    if y is not None:  # tahun tak wajar & tak ada pengganti -> buang
+        _YEAR_FIX_COUNT[0] += 1
+    return None
+
+
+def entri_halaman_redirect(item):
+    """Halaman antara LK21 ('Anda akan dialihkan ...') yang tertangkap sebagai film."""
+    return (str(item.get("title") or "").strip().lower()
+            .startswith("anda akan dialihkan"))
+
+
 def normalize_to_movie_dto(item):
     """Konversi item database ke MovieDto untuk catalog.json."""
     movie_type = item.get("type", "movie")
@@ -197,13 +238,9 @@ def normalize_to_movie_dto(item):
         rating = float(rating) if rating not in (None, "", "N/A") else None
     except (TypeError, ValueError):
         rating = None
-    year = item.get("releaseYear") or item.get("year")
-    try:
-        year = int(year) if year else None
-    except (TypeError, ValueError):
-        year = None
-
     title = item.get("title") or "Unknown"
+    year = koreksi_tahun(item.get("releaseYear") or item.get("year"), title, raw_id)
+
     overview = (item.get("overview") or "").strip()
     return {
         "id": dto_id,
@@ -281,7 +318,22 @@ def save_db_safely():
     """Simpan database (array, dibaca API Node), catalog.json, dan salinan dist bila ada."""
     os.makedirs(DATA_DIR, exist_ok=True)
     _atomic_write(DB_FILE, database)
-    dto = [rampingkan_dto(normalize_to_movie_dto(i)) for i in database]
+
+    # Simpan id halaman-antara "Anda akan dialihkan" sebelum dibuang dari katalog
+    # (banyak di antaranya serial nyata — bahan dukungan Nontondrama kelak).
+    redirect_ids = [str(i.get("id")) for i in database if entri_halaman_redirect(i)]
+    if redirect_ids:
+        with open(REDIRECT_FILE, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(redirect_ids) + "\n")
+
+    _YEAR_FIX_COUNT[0] = 0
+    dto_semua = [rampingkan_dto(normalize_to_movie_dto(i)) for i in database]
+    # Buang entri yang tak dapat diputar (tanpa server atau tanpa videoUrl).
+    dto = [d for d in dto_semua if d.get("servers") and d.get("videoUrl")]
+    dibuang = len(dto_semua) - len(dto)
+    print(f"[koreksi] tahun diperbaiki dari judul/slug : {_YEAR_FIX_COUNT[0]} entri")
+    print(f"[koreksi] entri tak-dapat-diputar dibuang  : {dibuang}"
+          f" ({len(redirect_ids)} halaman redirect -> {REDIRECT_FILE})")
     _atomic_write(CATALOG_FILE, build_catalog_json(dto), padat=True)
 
     if os.path.isdir(os.path.dirname(DIST_CATALOG)):
@@ -334,6 +386,11 @@ def worker_task(worker_id, url_queue):
 
         try:
             item = scrape_with_driver(driver, url)
+            if item is None:  # halaman antara "Anda akan dialihkan" — lewati
+                with db_lock:
+                    stats["skipped"] = stats.get("skipped", 0) + 1
+                print(f"[W-{worker_id}] [{idx}/{total_to_process}] SKIP redirect {url}")
+                continue
             if TMDB_API_KEY:
                 item = enrich_with_tmdb(item, TMDB_API_KEY)
             to_api_record(item)

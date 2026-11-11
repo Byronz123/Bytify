@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -89,6 +92,7 @@ data class HomeUiState(
     val forgotten: List<Song> = emptyList(),
     val chartIndonesia: List<Song> = emptyList(),
     val chartGlobal: List<Song> = emptyList(),
+    val albums: List<com.bytify.app.data.remote.Album> = emptyList(),
     val becauseArtist: String? = null,
     val becauseSongs: List<Song> = emptyList(),
     val loading: Boolean = true,
@@ -99,6 +103,14 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
     private val remote = MutableStateFlow(HomeUiState())
 
     val recent: StateFlow<List<Song>> = c.library.recentSongs(20)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Rekomendasi yang mengikuti selera; dihitung ulang sendiri saat riwayat berubah. */
+    val untukmu: StateFlow<List<Song>> = c.musicCatalog.rekomendasi(limit = 30)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Baris mix personal bergaya Spotify: acak dan mengikuti selera. */
+    val mix: StateFlow<List<com.bytify.app.data.music.MixLagu>> = c.musicCatalog.mixPersonal()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val forgotten: StateFlow<List<Song>> = c.library.forgottenFavorites(daysAgo(14))
@@ -121,16 +133,26 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<HomeUiState> = remote
 
     init {
-        refresh()
+        // Amati tangga lagu yang disinkron sendiri di AppContainer, jadi lagu
+        // terbaru muncul otomatis walau layar sedang terbuka (parity katalog film).
+        viewModelScope.launch {
+            c.tanggaLaguId.collect { remote.value = remote.value.copy(chartIndonesia = it, loading = false) }
+        }
+        viewModelScope.launch {
+            c.tanggaLaguGlobal.collect { remote.value = remote.value.copy(chartGlobal = it) }
+        }
+        viewModelScope.launch {
+            c.albumPopuler.collect { remote.value = remote.value.copy(albums = it) }
+        }
+        // Picu sinkron awal bila container belum sempat mengisi saat Home dibuka.
+        if (c.tanggaLaguId.value.isEmpty()) refresh()
     }
 
     fun refresh(force: Boolean = false) {
-        if (force) c.charts.clearCache()
         remote.value = remote.value.copy(loading = true)
         viewModelScope.launch {
-            val id = runCatching { c.charts.topSongs("id") }.getOrDefault(emptyList())
-            val global = runCatching { c.charts.topSongs("us") }.getOrDefault(emptyList())
-            remote.value = remote.value.copy(chartIndonesia = id, chartGlobal = global, loading = false)
+            c.segarkanTanggaLagu(paksa = force)
+            remote.value = remote.value.copy(loading = false)
         }
     }
 
@@ -148,6 +170,8 @@ fun HomeScreen() {
     val recent by vm.recent.collectAsState()
     val forgotten by vm.forgotten.collectAsState()
     val because by vm.because.collectAsState()
+    val untukmu by vm.untukmu.collectAsState()
+    val mix by vm.mix.collectAsState()
     val current by app.player.state.collectAsState()
     val quickPicks = (recent.ifEmpty { state.chartIndonesia }).take(6)
 
@@ -221,15 +245,29 @@ fun HomeScreen() {
                 item { SongCarousel("Lanjutkan mendengarkan", recent) }
             }
 
+            if (untukmu.isNotEmpty()) {
+                item {
+                    SongCarousel(
+                        title = "Untukmu",
+                        songs = untukmu.take(15),
+                        playAll = untukmu,
+                    )
+                }
+            }
+
             item {
                 SongCarousel(
-                    title = "Top 50 Indonesia",
+                    title = "Top 100 Indonesia",
                     songs = state.chartIndonesia.take(15),
                     loading = state.loading && state.chartIndonesia.isEmpty(),
                     numbered = true,
                     onSeeAll = { app.navigate(Routes.collection("chart:id")) },
                     playAll = state.chartIndonesia,
                 )
+            }
+
+            if (state.albums.isNotEmpty()) {
+                item { AlbumCarousel("Album populer", state.albums.take(15)) }
             }
 
             because?.let { (artist, songs) ->
@@ -241,6 +279,14 @@ fun HomeScreen() {
                             onSeeAll = { app.navigate(Routes.collection("artist:$artist")) },
                         )
                     }
+                }
+            }
+
+            // Saran selalu ada walau belum ada riwayat: blend tangga lagu nyata.
+            if (because == null) {
+                val saran = (state.chartIndonesia + state.chartGlobal).distinctBy { it.id }.drop(15).take(12)
+                if (saran.isNotEmpty()) {
+                    item { SongCarousel("Pilihan untukmu", saran) }
                 }
             }
 
@@ -257,6 +303,12 @@ fun HomeScreen() {
                     onSeeAll = { app.navigate(Routes.collection("chart:us")) },
                     playAll = state.chartGlobal,
                 )
+            }
+
+            // Mix personal: beberapa campuran acak yang mengikuti selera,
+            // menggantikan daftar peringkat bernomor yang terasa kaku.
+            items(mix, key = { it.judul }) { baris ->
+                SongGridCarousel(title = baris.judul, songs = baris.lagu)
             }
 
             if (!state.loading && state.chartIndonesia.isEmpty() && recent.isEmpty()) {
@@ -332,3 +384,76 @@ fun SongCarousel(
         }
     }
 }
+
+/**
+ * Carousel lagu dua baris yang digulir mendatar — bentuk yang dipakai untuk
+ * mix personal. Dibanding satu baris, ruang vertikal yang sama memuat dua kali
+ * lipat lagu sehingga Beranda terasa lebih padat tanpa menambah guliran.
+ */
+@Composable
+fun SongGridCarousel(title: String, songs: List<Song>) {
+    val app = appState()
+    if (songs.isEmpty()) return
+    SectionHeader(title)
+    LazyHorizontalGrid(
+        rows = GridCells.Fixed(2),
+        // 2 x (sampul 128 + jarak 6 + judul + artis) + jarak antarbaris.
+        // Dilebihkan sedikit supaya baris kedua teks tidak terpotong.
+        modifier = Modifier.height(368.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        gridItemsIndexed(songs, key = { i, s -> "$title-$i-${s.id}" }) { index, song ->
+            Column(
+                Modifier
+                    .width(132.dp)
+                    .clickable { app.play(songs, index) },
+            ) {
+                Artwork(
+                    song.thumbnailUrl,
+                    Modifier.size(128.dp).cel(shape = RoundedCornerShape(12.dp)),
+                    RoundedCornerShape(12.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(song.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Carousel album; mengetuk album membuka daftar lagunya (dicari lewat YouTube). */
+@Composable
+fun AlbumCarousel(title: String, albums: List<com.bytify.app.data.remote.Album>) {
+    val app = appState()
+    if (albums.isEmpty()) return
+    SectionHeader(title)
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(albums, key = { it.id }) { album ->
+            Column(
+                Modifier
+                    .width(152.dp)
+                    .clickable { app.navigate(Routes.collection("album:${album.name}|${album.query}")) },
+            ) {
+                Artwork(album.artworkUrl, Modifier.size(148.dp).cel(shape = RoundedCornerShape(14.dp)), RoundedCornerShape(14.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(album.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    album.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+

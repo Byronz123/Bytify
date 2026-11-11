@@ -282,7 +282,7 @@ private fun EmptyText(text: String) {
 
 /**
  * Jenis koleksi: `liked`, `top:<hari>`, `chart:<negara>`, `mood:<label>|<kueri>`,
- * atau `artist:<nama>`.
+ * `album:<nama>|<kueri>`, atau `artist:<nama>`.
  */
 @Composable
 fun CollectionScreen(kind: String) {
@@ -296,9 +296,10 @@ fun CollectionScreen(kind: String) {
                 val days = kind.removePrefix("top:")
                 Triple(if (days == "7") "Paling sering minggu ini" else "Paling sering bulan ini", "Playlist otomatis", true)
             }
-            kind == "chart:id" -> Triple("Top 50 Indonesia", "Tangga lagu • Apple Music", true)
-            kind.startsWith("chart:") -> Triple("Top 50 Dunia", "Tangga lagu • Apple Music", true)
+            kind == "chart:id" -> Triple("Top 100 Indonesia", "Tangga lagu • Apple Music", true)
+            kind.startsWith("chart:") -> Triple("Top 100 Dunia", "Tangga lagu • Apple Music", true)
             kind.startsWith("mood:") -> Triple(kind.removePrefix("mood:").substringBefore('|'), "Mood", false)
+            kind.startsWith("album:") -> Triple(kind.removePrefix("album:").substringBefore('|'), "Album", false)
             else -> Triple(kind.removePrefix("artist:"), "Artis", false)
         }
     }
@@ -323,6 +324,7 @@ fun CollectionScreen(kind: String) {
             when {
                 kind.startsWith("chart:") -> c.charts.topSongs(kind.removePrefix("chart:"))
                 kind.startsWith("mood:") -> c.youtube.searchSongs(kind.substringAfter('|'))
+                kind.startsWith("album:") -> c.youtube.searchSongs(kind.substringAfter('|'))
                 else -> c.youtube.searchSongs(kind.removePrefix("artist:"))
             }
         }.onFailure { failed = true }.getOrNull()

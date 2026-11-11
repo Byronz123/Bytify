@@ -14,7 +14,20 @@ test('serves movie and HTTPS live catalog contracts for the APK', async (t) => {
             id: 'public-domain-film',
             title: 'Public Domain Film',
             poster_url: 'https://media.example/poster.jpg',
-            stream_urls: ['https://media.example/film.mp4'],
+            stream_urls: ['https://media.example/notice.mp4', 'https://media.example/film.m3u8'],
+        },
+        {
+            id: 'new-json-shape',
+            title: 'New JSON Shape',
+            overview: 'A synopsis from the updated database.',
+            poster: 'https://media.example/poster.png',
+            posterUrl: 'https://media.example/poster-url.png',
+            rating: '7.5',
+            year: '2024',
+            videoUrl: 'https://media.example/embed/player',
+            streamUrl: 'https://media.example/notice.mp4',
+            streamUrls: ['https://media.example/notice.mp4', 'https://media.example/film.m3u8'],
+            sourceUrl: 'https://source.example/movie',
         },
     ]));
     writeFileSync(liveDatabasePath, JSON.stringify([
@@ -52,7 +65,24 @@ test('serves movie and HTTPS live catalog contracts for the APK', async (t) => {
     const movieCatalog = await movieResponse.json();
     assert.equal(movieCatalog.movies[0].id, 'public-domain-film');
     assert.equal(movieCatalog.movies[0].posterUrl, 'https://media.example/poster.jpg');
-    assert.equal(movieCatalog.movies[0].videoUrl, 'https://media.example/film.mp4');
+    assert.equal(movieCatalog.movies[0].streamUrl, 'https://media.example/notice.mp4');
+    assert.deepEqual(movieCatalog.movies[0].streamUrls, [
+        'https://media.example/notice.mp4',
+        'https://media.example/film.m3u8',
+    ]);
+    assert.equal(movieCatalog.movies[0].videoUrl, 'https://media.example/notice.mp4');
+    const updatedMovie = movieCatalog.movies.find((movie) => movie.id === 'new-json-shape');
+    assert.equal(updatedMovie.overview, 'A synopsis from the updated database.');
+    assert.equal(updatedMovie.posterUrl, 'https://media.example/poster-url.png');
+    assert.equal(updatedMovie.rating, 7.5);
+    assert.equal(updatedMovie.releaseYear, 2024);
+    assert.equal(updatedMovie.videoUrl, 'https://media.example/embed/player');
+    assert.equal(updatedMovie.streamUrl, 'https://media.example/notice.mp4');
+    assert.deepEqual(updatedMovie.streamUrls, [
+        'https://media.example/notice.mp4',
+        'https://media.example/film.m3u8',
+    ]);
+    assert.equal(updatedMovie.sourceUrl, 'https://source.example/movie');
 
     const liveResponse = await fetch(`${baseUrl}/api/live/channels`);
     assert.equal(liveResponse.status, 200);

@@ -38,19 +38,34 @@ function firstUrl(...values) {
 }
 
 export function toMovie(item) {
+    const rawYear = item.releaseYear ?? item.release_year ?? item.year;
+    const parsedYear = Number.parseInt(String(rawYear ?? ''), 10);
+    const rawRating = Number.parseFloat(String(item.rating ?? ''));
+    const streamUrls = [
+        ...new Set(
+            [item.streamUrl, item.stream_url, item.streamUrls, item.stream_urls]
+                .flatMap((value) => Array.isArray(value) ? value : [value])
+                .filter((url) => typeof url === 'string' && url.trim())
+                .map((url) => url.trim()),
+        ),
+    ];
+
     return {
         id: String(item.id ?? ''),
         type: 'movie',
         title: String(item.title ?? ''),
         overview: String(item.overview ?? item.description ?? ''),
-        posterUrl: item.posterUrl ?? item.poster_url ?? null,
+        posterUrl: item.posterUrl ?? item.poster_url ?? item.poster ?? null,
         backdropUrl: item.backdropUrl ?? item.backdrop_url ?? null,
-        releaseYear: item.releaseYear ?? item.release_year ?? null,
+        releaseYear: Number.isInteger(parsedYear) && parsedYear >= 1888 && parsedYear <= 2200 ? parsedYear : null,
         durationMin: item.durationMin ?? item.duration_min ?? null,
         genres: Array.isArray(item.genres) ? item.genres : [],
-        rating: item.rating ?? null,
+        rating: Number.isFinite(rawRating) && rawRating >= 0 && rawRating <= 10 ? rawRating : null,
         language: item.language ?? null,
-        videoUrl: item.videoUrl ?? firstUrl(item.stream_urls, item.dl_urls),
+        streamUrl: item.streamUrl ?? item.stream_url ?? streamUrls[0] ?? null,
+        streamUrls,
+        videoUrl: item.videoUrl ?? item.video_url ?? firstUrl(streamUrls, item.dl_urls),
+        sourceUrl: item.sourceUrl ?? item.source_url ?? null,
         trailerUrl: item.trailerUrl ?? item.trailer_url ?? null,
         subtitles: Array.isArray(item.subtitles) ? item.subtitles : [],
         license: item.license ?? null,

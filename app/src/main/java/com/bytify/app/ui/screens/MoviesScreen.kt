@@ -124,19 +124,29 @@ fun MoviesScreen(embedded: Boolean = false) {
         }
     }
 
-    val source = when (selectedFilter) {
-        "favorites" -> favorites
-        "movie" -> movies.filter { !it.isSeries }
-        "series" -> movies.filter { it.isSeries }
-        else -> movies
+    // Penyaringan di-cache supaya katalog ~10.000 film tidak dipindai ulang pada
+    // setiap recomposition. Catatan hasil ukur: ini TIDAK menurunkan jank saat
+    // kolom cari kosong (predikatnya langsung true, jadi sudah murah); gunanya
+    // terasa saat pengguna mengetik kueri, ketika pemindaian benar-benar bekerja.
+    val source = remember(selectedFilter, movies, favorites) {
+        when (selectedFilter) {
+            "favorites" -> favorites
+            "movie" -> movies.filter { !it.isSeries }
+            "series" -> movies.filter { it.isSeries }
+            else -> movies
+        }
     }
-    val sectionIds = selectedFilter.removePrefix("section:").takeIf { selectedFilter.startsWith("section:") }
-        ?.let { selectedTitle -> sections.firstOrNull { it.title == selectedTitle }?.movieIds?.toSet() }
-    val visibleMovies = source.filter { movie ->
-        val matchesQuery = query.isBlank() || movie.title.contains(query, true) ||
-            movie.overview.contains(query, true) || movie.genres.any { it.contains(query, true) }
-        val matchesSection = sectionIds == null || movie.id in sectionIds
-        matchesQuery && matchesSection
+    val sectionIds = remember(selectedFilter, sections) {
+        selectedFilter.removePrefix("section:").takeIf { selectedFilter.startsWith("section:") }
+            ?.let { selectedTitle -> sections.firstOrNull { it.title == selectedTitle }?.movieIds?.toSet() }
+    }
+    val visibleMovies = remember(source, query, sectionIds) {
+        source.filter { movie ->
+            val matchesQuery = query.isBlank() || movie.title.contains(query, true) ||
+                movie.overview.contains(query, true) || movie.genres.any { it.contains(query, true) }
+            val matchesSection = sectionIds == null || movie.id in sectionIds
+            matchesQuery && matchesSection
+        }
     }
 
     Column(if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()) {

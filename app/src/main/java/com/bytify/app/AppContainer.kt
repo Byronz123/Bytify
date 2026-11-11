@@ -1,5 +1,9 @@
 package com.bytify.app
 
+import android.util.Log
+import kotlinx.coroutines.delay
+import com.bytify.app.data.movie.KATALOG_MASIH_SEGAR
+import com.bytify.app.data.movie.USIA_KATALOG_DEFAULT_MS
 import com.bytify.app.data.remote.PodcastRepository
 import com.bytify.app.data.movie.MovieCatalogApi
 import com.bytify.app.data.movie.MovieRepository
@@ -153,6 +157,28 @@ class AppContainer(context: Context) {
 
     init {
         autoDownloadLikedSongs()
+        autoSyncKatalogFilm()
+    }
+
+    /**
+     * Katalog film diperbarui sendiri: sekali saat aplikasi dijalankan, lalu
+     * diperiksa berkala selama aplikasi hidup. Unduhan hanya terjadi bila
+     * katalog sudah usang, jadi membuka layar film tetap ringan.
+     */
+    private fun autoSyncKatalogFilm() {
+        if (!movies.isCatalogConfigured) return
+        appScope.launch {
+            while (true) {
+                runCatching { movies.refreshIfStale() }
+                    .onSuccess { jumlah ->
+                        if (jumlah != KATALOG_MASIH_SEGAR) {
+                            Log.i("BytifyKatalog", "katalog film diperbarui otomatis: $jumlah judul")
+                        }
+                    }
+                    .onFailure { Log.w("BytifyKatalog", "sinkronisasi otomatis gagal: ${it.message}") }
+                delay(USIA_KATALOG_DEFAULT_MS)
+            }
+        }
     }
 
     /** Jika diaktifkan, lagu yang baru disukai langsung diunduh. */

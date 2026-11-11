@@ -10,6 +10,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
+/** Penanda bahwa katalog masih segar sehingga tidak diunduh ulang. */
+const val KATALOG_MASIH_SEGAR = -1
+
+/** Katalog dianggap usang setelah 3 jam. */
+const val USIA_KATALOG_DEFAULT_MS = 3L * 60 * 60 * 1000
+
 class MovieRepository(
     private val dao: BytifyDao,
     private val api: MovieCatalogApi,
@@ -33,6 +39,19 @@ class MovieRepository(
 
     fun search(query: String): Flow<List<Movie>> = dao.searchMovies(query.trim())
         .map { rows -> rows.map { it.toMovie(json) } }
+
+    /**
+     * Segarkan katalog hanya bila sudah lebih tua dari [maksimalUsiaMs].
+     * Mengembalikan [KATALOG_MASIH_SEGAR] bila pengunduhan dilewati, sehingga
+     * membuka layar film tidak selalu menarik ulang berkas katalog penuh.
+     */
+    suspend fun refreshIfStale(maksimalUsiaMs: Long = USIA_KATALOG_DEFAULT_MS): Int {
+        val terakhir = runCatching { dao.lastMovieSync() }.getOrNull() ?: 0L
+        if (terakhir > 0L && System.currentTimeMillis() - terakhir < maksimalUsiaMs) {
+            return KATALOG_MASIH_SEGAR
+        }
+        return refresh()
+    }
 
     /** Ambil katalog, simpan perubahan ke Room, dan pertahankan status favorit. */
     suspend fun refresh(): Int {
@@ -132,6 +151,8 @@ private fun Movie.toEntity(json: Json, updatedAt: Long) = MovieEntity(
     trailerUrl = trailerUrl,
     subtitlesJson = json.encodeToString(subtitles),
     license = license,
+    sourceUrl = sourceUrl,
+    serversJson = json.encodeToString(servers),
     updatedAt = updatedAt,
 )
 
@@ -152,4 +173,7 @@ private fun MovieEntity.toMovie(json: Json) = Movie(
     trailerUrl = trailerUrl,
     subtitles = runCatching { json.decodeFromString<List<MovieSubtitleDto>>(subtitlesJson) }.getOrDefault(emptyList()),
     license = license,
+    sourceUrl = sourceUrl,
+    servers = runCatching { json.decodeFromString<List<MovieServerDto>>(serversJson) }
+        .getOrDefault(emptyList()),
 )

@@ -1,5 +1,6 @@
 package com.bytify.app.ui.screens
 
+import com.bytify.app.data.movie.KATALOG_MASIH_SEGAR
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -79,13 +80,17 @@ fun MoviesScreen(embedded: Boolean = false) {
     var searchingRemote by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
 
-    fun refreshCatalog() {
+    fun refreshCatalog(paksa: Boolean = true) {
         if (refreshing) return
         scope.launch {
             refreshing = true
             syncMessage = null
             try {
-                val count = repository.refresh()
+                val count = if (paksa) repository.refresh() else repository.refreshIfStale()
+                if (count == KATALOG_MASIH_SEGAR) {
+                    // Katalog masih baru; tidak perlu unduh ulang berkas penuh.
+                    return@launch
+                }
                 syncMessage = if (count == 0) {
                     "Katalog berhasil diperiksa; belum ada film baru dalam respons."
                 } else {
@@ -100,7 +105,7 @@ fun MoviesScreen(embedded: Boolean = false) {
     }
 
     LaunchedEffect(Unit) {
-        if (repository.isCatalogConfigured) refreshCatalog()
+        if (repository.isCatalogConfigured) refreshCatalog(paksa = false)
     }
 
     // Pencarian otomatis ke server LK21 saat pengguna mengetik minimal 2 huruf

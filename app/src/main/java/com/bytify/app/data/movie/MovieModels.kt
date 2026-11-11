@@ -1,6 +1,9 @@
 package com.bytify.app.data.movie
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** Respons JSON katalog film yang disediakan backend Bytify. */
 @Serializable
@@ -16,14 +19,20 @@ data class MovieDto(
     val type: String = "movie",
     val title: String = "",
     val overview: String = "",
+    val poster: String? = null,
     val posterUrl: String? = null,
     val backdropUrl: String? = null,
     val releaseYear: Int? = null,
+    val year: JsonElement? = null,
     val durationMin: Int? = null,
     val genres: List<String> = emptyList(),
-    val rating: Double? = null,
+    val rating: JsonElement? = null,
     val language: String? = null,
     val videoUrl: String? = null,
+    val streamUrl: String? = null,
+    val streamUrls: List<String> = emptyList(),
+    val sourceUrl: String? = null,
+    val servers: List<MovieServerDto> = emptyList(),
     val trailerUrl: String? = null,
     val subtitles: List<MovieSubtitleDto> = emptyList(),
     val license: String? = null,
@@ -49,6 +58,13 @@ data class MovieSubtitleDto(
     val url: String = "",
 )
 
+/** Satu server player alternatif (p2p, cast, hydrax, turbovip, ...). */
+@Serializable
+data class MovieServerDto(
+    val server: String = "",
+    val url: String = "",
+)
+
 @Serializable
 data class MovieSectionDto(
     val title: String = "",
@@ -71,6 +87,10 @@ data class Movie(
     val trailerUrl: String?,
     val subtitles: List<MovieSubtitleDto>,
     val license: String?,
+    /** Halaman sumber film. Dipakai sebagai Referer saat memuat embed player. */
+    val sourceUrl: String? = null,
+    /** Server player alternatif; dipakai untuk berpindah sumber/resolusi. */
+    val servers: List<MovieServerDto> = emptyList(),
     val episodes: List<EpisodeDto> = emptyList(),
 ) {
     /** Bisa diputar bila film punya URL video atau serial punya minimal satu episode. */
@@ -89,25 +109,47 @@ fun MovieDto.toMovie(): Movie = Movie(
     isSeries = type.equals("series", ignoreCase = true),
     title = title.trim(),
     overview = overview,
-    posterUrl = posterUrl.cleanUrlOrNull(),
+    posterUrl = (posterUrl ?: poster).cleanUrlOrNull(),
     backdropUrl = backdropUrl.cleanUrlOrNull(),
-    releaseYear = releaseYear?.takeIf { it in 1888..2200 },
+    releaseYear = (releaseYear ?: year?.jsonPrimitive?.contentOrNull?.toIntOrNull())
+        ?.takeIf { it in 1888..2200 },
     durationMin = durationMin?.takeIf { it > 0 },
     genres = genres.map(String::trim).filter(String::isNotEmpty).distinct(),
-    rating = rating?.takeIf { it.isFinite() && it in 0.0..10.0 },
+    rating = rating?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+        ?.takeIf { it.isFinite() && it in 0.0..10.0 },
     language = language?.trim()?.takeIf(String::isNotEmpty),
-    videoUrl = videoUrl.cleanUrlOrNull(),
+    videoUrl = (videoUrl ?: streamUrl ?: streamUrls.firstOrNull()).cleanUrlOrNull(),
     trailerUrl = trailerUrl.cleanUrlOrNull(),
     subtitles = subtitles.filter { it.url.cleanUrlOrNull() != null },
     license = license?.trim()?.takeIf(String::isNotEmpty),
+    sourceUrl = sourceUrl.cleanUrlOrNull(),
+    servers = servers.filter { it.url.cleanUrlOrNull() != null }.distinctBy { it.url },
     episodes = episodes
         .filter { it.id.isNotBlank() && it.videoUrl.cleanUrlOrNull() != null }
         .map { it.copy(subtitles = it.subtitles.filter { s -> s.url.cleanUrlOrNull() != null }) }
         .distinctBy { it.id },
 )
 
+/**
+ * Penanda URL sampah: video kampanye anti-judi dan iklan yang disisipkan sumber
+ * ke dalam halaman film. URL seperti ini valid secara teknis (benar-benar .mp4),
+ * sehingga tanpa penyaringan ini pemutar akan memutarnya seolah-olah film.
+ * Catatan: hanya "donasi.assetsy" yang disaring; "poster.assetsy" adalah CDN
+ * poster yang sah dan harus tetap lolos.
+ */
+private val JUNK_URL_MARKERS = listOf(
+    "stopjudi", "donasi.assetsy", "judol", "slot-gacor", "anti-judi",
+)
+
+internal fun isJunkMediaUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    val lower = url.lowercase()
+    return JUNK_URL_MARKERS.any { lower.contains(it) }
+}
+
 private fun String?.cleanUrlOrNull(): String? = this
     ?.trim()
     ?.takeIf { value ->
-        value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)
+        (value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)) &&
+            !isJunkMediaUrl(value)
     }

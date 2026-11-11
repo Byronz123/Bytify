@@ -162,6 +162,10 @@ interface BytifyDao {
     suspend fun deleteAlarm(id: Long)
 
     // ---------- Film: katalog, favorit, riwayat ----------
+    /** Waktu sinkronisasi katalog terakhir; null bila katalog masih kosong. */
+    @Query("SELECT MAX(updatedAt) FROM movies")
+    suspend fun lastMovieSync(): Long?
+
     @Query("SELECT * FROM movies ORDER BY updatedAt DESC, title COLLATE NOCASE")
     fun movies(): Flow<List<MovieEntity>>
 

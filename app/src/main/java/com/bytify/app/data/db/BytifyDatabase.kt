@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LiveChannelEntity::class,
         LiveFavoriteEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
@@ -127,9 +127,23 @@ abstract class BytifyDatabase : RoomDatabase() {
             }
         }
 
+        /** Migrasi aditif: alamat halaman sumber film (Referer untuk embed player). */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `movies` ADD COLUMN `sourceUrl` TEXT DEFAULT ''")
+            }
+        }
+
+        /** Migrasi aditif: daftar server player alternatif per film. */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `movies` ADD COLUMN `serversJson` TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         fun create(context: Context): BytifyDatabase =
             Room.databaseBuilder(context, BytifyDatabase::class.java, "bytify.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build()
     }
 }

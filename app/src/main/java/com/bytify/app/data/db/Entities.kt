@@ -162,6 +162,10 @@ data class MovieEntity(
     val trailerUrl: String?,
     val subtitlesJson: String,
     val license: String?,
+    /** Halaman sumber film; dipakai sebagai Referer saat memuat embed player. */
+    @ColumnInfo(defaultValue = "") val sourceUrl: String? = null,
+    /** Daftar server player alternatif, disimpan sebagai JSON. */
+    @ColumnInfo(defaultValue = "[]") val serversJson: String = "[]",
     val updatedAt: Long,
 )
 

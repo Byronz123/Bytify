@@ -105,10 +105,6 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
     val recent: StateFlow<List<Song>> = c.library.recentSongs(20)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** Rekomendasi yang mengikuti selera; dihitung ulang sendiri saat riwayat berubah. */
-    val untukmu: StateFlow<List<Song>> = c.musicCatalog.rekomendasi(limit = 30)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     /** Baris mix personal bergaya Spotify: acak dan mengikuti selera. */
     val mix: StateFlow<List<com.bytify.app.data.music.MixLagu>> = c.musicCatalog.mixPersonal()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -170,7 +166,6 @@ fun HomeScreen() {
     val recent by vm.recent.collectAsState()
     val forgotten by vm.forgotten.collectAsState()
     val because by vm.because.collectAsState()
-    val untukmu by vm.untukmu.collectAsState()
     val mix by vm.mix.collectAsState()
     val current by app.player.state.collectAsState()
     val quickPicks = (recent.ifEmpty { state.chartIndonesia }).take(6)
@@ -243,16 +238,6 @@ fun HomeScreen() {
 
             if (recent.isNotEmpty()) {
                 item { SongCarousel("Lanjutkan mendengarkan", recent) }
-            }
-
-            if (untukmu.isNotEmpty()) {
-                item {
-                    SongCarousel(
-                        title = "Untukmu",
-                        songs = untukmu.take(15),
-                        playAll = untukmu,
-                    )
-                }
             }
 
             item {

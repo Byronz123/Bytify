@@ -294,36 +294,6 @@ class MusicCatalogRepository(
     }
 
     /**
-     * Rekomendasi yang mengikuti selera pengguna dan terus menyesuaikan.
-     *
-     * Profil selera dibangun dari bobot waktu dengar per artis (90 hari
-     * terakhir) ditambah bonus untuk artis dari lagu yang disukai. Tiap lagu
-     * katalog dinilai: kecocokan artis (bobot terbesar), popularitas tangga
-     * (agar pengguna baru tetap dapat hasil bagus), dan penalti bila baru saja
-     * diputar supaya daftar tidak itu-itu saja. Karena sumbernya Flow Room,
-     * nilai dihitung ulang sendiri setiap ada putaran atau suka baru.
-     */
-    fun rekomendasi(limit: Int = 50, jendelaHari: Int = 90): Flow<List<Song>> {
-        val sejak = System.currentTimeMillis() - jendelaHari * 24L * 60 * 60 * 1000
-        return combine(
-            dao.catalogSongs(),
-            dao.topArtists(sejak, 50),
-            dao.likedSongs(),
-            dao.recentlyPlayedIds(80),
-        ) { katalog, artisTeratas, disukai, baruDiputar ->
-            if (katalog.isEmpty()) return@combine emptyList()
-            val bobot = profilSelera(artisTeratas, disukai)
-            val baru = baruDiputar.toHashSet()
-            katalog.asSequence()
-                .map { it to skorLagu(it, bobot, baru) }
-                .sortedByDescending { it.second }
-                .take(limit)
-                .map { it.first.toSong() }
-                .toList()
-        }.flowOn(Dispatchers.Default)
-    }
-
-    /**
      * Baris-baris mix untuk Beranda, bergaya Spotify: bukan daftar peringkat,
      * melainkan beberapa campuran yang isinya diacak dan dipilih dari selera
      * pengguna — mix utama, mix per artis favorit, lalu penemuan acak.

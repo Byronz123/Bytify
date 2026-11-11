@@ -20,3 +20,6 @@ keystore.properties
 
 # Private provider URLs and rights configuration for the Live TV backend
 backend/live-api/.env
+
+# Cache runtime API LK21 (ditulis ulang tiap jalan; bukan sumber kebenaran)
+backend/api/data/lk21-cache.json

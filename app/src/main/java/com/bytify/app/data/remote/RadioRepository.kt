@@ -71,6 +71,12 @@ val RadioGenres = listOf(
  * Radio internet dari Radio Browser (radio-browser.info): direktori terbuka,
  * gratis, tanpa kunci API. Beberapa server cermin dicoba bergantian.
  */
+/**
+ * Batas jumlah stasiun per permintaan ke radio-browser. Terukur: Indonesia
+ * punya 505 stasiun aktif, jadi batas lama 60 hanya menampilkan 12% katalog.
+ */
+const val JUMLAH_STASIUN_MAKS = 500
+
 class RadioRepository(
     private val client: OkHttpClient,
     private val json: Json,
@@ -99,13 +105,19 @@ class RadioRepository(
         if (favorite) dao.deleteRadioFavorite(station.id) else dao.upsertRadioFavorite(station.toEntity())
     }
 
-    suspend fun popular(country: String = "ID", limit: Int = 60) =
+    /**
+     * radio-browser tidak membatasi jumlah; Indonesia sendiri punya 505
+     * stasiun aktif, jadi batas 60 memotong sebagian besar katalog.
+     * Dinaikkan ke 500 — cukup memuat satu negara penuh tanpa membuat
+     * satu permintaan menjadi terlalu besar.
+     */
+    suspend fun popular(country: String = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
         query("search", mapOf("countrycode" to country, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))
 
-    suspend fun byTag(tag: String, country: String = "ID", limit: Int = 60) =
+    suspend fun byTag(tag: String, country: String = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
         query("search", mapOf("countrycode" to country, "tag" to tag, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))
 
-    suspend fun search(name: String, limit: Int = 60): List<RadioStation> {
+    suspend fun search(name: String, limit: Int = JUMLAH_STASIUN_MAKS): List<RadioStation> {
         val q = name.trim()
         if (q.isEmpty()) return emptyList()
         return query("search", mapOf("name" to q, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))

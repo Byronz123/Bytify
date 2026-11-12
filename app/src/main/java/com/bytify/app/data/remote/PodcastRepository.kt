@@ -109,7 +109,11 @@ class PodcastRepository(
         dao.allEpisodeProgress().map { list -> list.associateBy { it.episodeId } }
 
     /** Podcast teratas di [country] (urutan tangga Apple). */
-    suspend fun top(country: String = "id", limit: Int = 30): List<Podcast> = withContext(Dispatchers.IO) {
+    /**
+     * Tangga podcast teratas. Apple RSS membatasi 100 entri per negara
+     * (101+ mengembalikan HTTP 500), jadi inilah maksimum dari sumbernya.
+     */
+    suspend fun top(country: String = "id", limit: Int = 100): List<Podcast> = withContext(Dispatchers.IO) {
         podcastCache["top:$country"]?.let { return@withContext it }
         val ids = get("https://rss.marketingtools.apple.com/api/v2/$country/podcasts/top/$limit/podcasts.json") {
             json.decodeFromString<ChartFeed>(it).feed.results.map { r -> r.id }

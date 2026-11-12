@@ -78,7 +78,7 @@ def run_full_sync_cycle():
     # 1. Auto-Crawl Film Baru
     try:
         print("\n[TAHAP 1/4] Memindai Katalog Film Terbaru...")
-        crawl_massive_catalog_parallel(DEFAULT_MOVIE_DOMAIN, target_limit=3000)
+        crawl_massive_catalog_parallel(DEFAULT_MOVIE_DOMAIN)
     except Exception as e:
         print(f"[!] Error pada Tahap 1 (Crawler): {e}")
         traceback.print_exc()

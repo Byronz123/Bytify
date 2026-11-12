@@ -38,7 +38,12 @@ MAX_WORKERS = int(os.environ.get("BYTIFY_WORKERS", "4") or 4)
 # Alamat publik tempat folder subtitles di-hosting. Tanpa ini, subtitle lokal
 # tetap didaftar memakai path relatif "subtitles/<slug>/<berkas>".
 SUBTITLE_BASE_URL = os.environ.get("BYTIFY_SUBTITLE_BASE", "").rstrip("/")
-SAVE_EVERY = 5
+# Setiap penyimpanan menulis ULANG seluruh database. Dengan 5, berkas 27 MB
+# (nanti ~66 MB) ditulis belasan kali per menit — makin lambat seiring katalog
+# membesar. 100 memangkas tulisan disk 20x, dan yang dipertaruhkan saat proses
+# berhenti mendadak hanya ~2 menit kerja, karena film yang sudah ada dilewati
+# saat dijalankan ulang.
+SAVE_EVERY = int(os.environ.get("BYTIFY_SAVE_EVERY", "100") or 100)
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
 # Nama tampil untuk kode bahasa ISO-639-1 yang lazim dipakai subtitle.
@@ -102,6 +107,11 @@ def rampingkan_dto(dto):
 
 
 db_lock = threading.Lock()
+# Penyimpanan HARUS berurutan. Enam worker bisa mencapainya bersamaan dan
+# saling berebut berkas sementara yang sama, sehingga film yang sedang digarap
+# gagal dengan WinError 32/2 — film hilang bukan karena situsnya, melainkan
+# karena balapan antar-thread.
+save_lock = threading.Lock()
 database = []
 existing_urls = set()
 total_to_process = 0
@@ -305,7 +315,9 @@ def build_catalog_json(movies):
 def _atomic_write(path, payload, padat=False):
     """padat=True menulis tanpa indentasi; dipakai untuk berkas yang diunduh
     perangkat, karena spasi indentasi saja memakan sekitar 5 MB."""
-    tmp = path + ".tmp"
+    # Nama sementara dibuat unik per-thread supaya dua penulis tidak pernah
+    # memakai berkas perantara yang sama.
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as out:
         if padat:
             json.dump(payload, out, ensure_ascii=False, separators=(",", ":"))
@@ -316,6 +328,11 @@ def _atomic_write(path, payload, padat=False):
 
 def save_db_safely():
     """Simpan database (array, dibaca API Node), catalog.json, dan salinan dist bila ada."""
+    with save_lock:
+        _save_db_locked()
+
+
+def _save_db_locked():
     os.makedirs(DATA_DIR, exist_ok=True)
     _atomic_write(DB_FILE, database)
 
@@ -536,7 +553,48 @@ def clean_old_database():
     print(f"[*] Selesai. {junk} URL junk dibuang. Database & catalog.json diperbarui.")
 
 
+def _kunci_proses_tunggal():
+    """
+    Cegah dua build_database berjalan bersamaan.
+
+    Pernah terjadi tiga proses menulis database yang sama sekaligus (daemon dan
+    jalan manual), saling berebut berkas sementara sehingga film yang sedang
+    digarap gagal. Kunci ini membuat kejadian itu mustahil terulang.
+    """
+    kunci = os.path.join(DATA_DIR, ".build_database.lock")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if os.path.exists(kunci):
+        try:
+            pid_lama = int(open(kunci, encoding="utf-8").read().strip() or 0)
+        except Exception:
+            pid_lama = 0
+        if pid_lama and pid_lama != os.getpid() and _pid_hidup(pid_lama):
+            print(f"[!] build_database lain masih berjalan (PID {pid_lama}). Dibatalkan.")
+            return None
+        print("[*] Kunci lama ditemukan tetapi prosesnya sudah mati — dilanjutkan.")
+    with open(kunci, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    return kunci
+
+
+def _pid_hidup(pid):
+    try:
+        import subprocess
+        keluar = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=20,
+        ).stdout
+        return str(pid) in keluar
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
+    _kunci = _kunci_proses_tunggal()
+    if _kunci is None:
+        sys.exit(1)
+    import atexit
+    atexit.register(lambda: os.path.exists(_kunci) and os.remove(_kunci))
     if "--clean" in sys.argv:
         clean_old_database()
     else:

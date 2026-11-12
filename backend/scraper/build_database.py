@@ -44,6 +44,12 @@ SUBTITLE_BASE_URL = os.environ.get("BYTIFY_SUBTITLE_BASE", "").rstrip("/")
 # berhenti mendadak hanya ~2 menit kerja, karena film yang sudah ada dilewati
 # saat dijalankan ulang.
 SAVE_EVERY = int(os.environ.get("BYTIFY_SAVE_EVERY", "100") or 100)
+
+# Browser disegarkan tiap sekian film per worker. Chrome menggelembung setelah
+# menjelajahi ribuan halaman — terukur: RAM bebas turun 5,1 GB ke 1,7 GB dalam
+# 25 menit dan laju anjlok dari 97 ke 33 film/menit. Menutup lalu membuka
+# browser melepaskan memori itu, dengan ongkos beberapa detik sekali daur.
+RECYCLE_EVERY = int(os.environ.get("BYTIFY_RECYCLE_EVERY", "150") or 150)
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
 # Nama tampil untuk kode bahasa ISO-639-1 yang lazim dipakai subtitle.
@@ -395,6 +401,7 @@ def worker_task(worker_id, url_queue):
         print(f"[!] Build Worker-{worker_id} gagal memulai browser: {e}")
         return
 
+    diproses = 0
     while True:
         try:
             idx, url = url_queue.get_nowait()
@@ -439,6 +446,15 @@ def worker_task(worker_id, url_queue):
                 )
                 if stats["success"] % SAVE_EVERY == 0:
                     save_db_safely()
+
+                diproses += 1
+                if diproses % RECYCLE_EVERY == 0:
+                    print(f"[W-{worker_id}] menyegarkan browser setelah {diproses} film")
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    driver = init_stealth_driver()
 
         except Exception as e:
             with db_lock:

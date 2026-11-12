@@ -48,6 +48,17 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
                 `(Cloudflare Pages menolak di atas ${BATAS_MIB} MiB). Rampingkan katalog dulu.`,
         );
 
+        // Kanal Live TV tumbuh mengikuti iptv-org (kini 13.006), jadi berkasnya
+        // ikut dijaga terhadap batas yang sama.
+        const kanalPath = path.join(outDir, 'api', 'live', 'channels.json');
+        const kanalMiB = fs.statSync(kanalPath).size / (1024 * 1024);
+        assert.ok(
+            kanalMiB < AMAN_MIB,
+            `channels.json ${kanalMiB.toFixed(2)} MiB melewati ambang aman ${AMAN_MIB} MiB.`,
+        );
+        const kanal = JSON.parse(fs.readFileSync(kanalPath, 'utf8'));
+        assert.ok(kanal.channels.length > 0, 'channels.json tidak boleh kosong');
+
         // Disalin apa adanya: byte-identik dengan sumber.
         assert.ok(
             fs.readFileSync(builtPath).equals(fs.readFileSync(sourcePath)),

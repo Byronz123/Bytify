@@ -2,7 +2,9 @@ package com.bytify.app.data.live
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -17,6 +19,7 @@ class LiveCatalogApi(
 ) {
     val isConfigured: Boolean get() = catalogUrl.isNotBlank()
 
+    @OptIn(ExperimentalSerializationApi::class)
     suspend fun fetchCatalog(): LiveCatalogDto = withContext(Dispatchers.IO) {
         if (!isConfigured) {
             throw IllegalStateException(
@@ -41,10 +44,13 @@ class LiveCatalogApi(
             if (!response.isSuccessful) {
                 throw IOException("Server Live TV mengembalikan HTTP ${response.code}.")
             }
-            val body = response.body?.string()?.takeIf(String::isNotBlank)
+            // Diurai dari aliran data, bukan String: katalog kanal kini
+            // megabyte-an, dan memuatnya utuh ke memori pernah membuat
+            // katalog film mati dengan OutOfMemoryError.
+            val stream = response.body?.byteStream()
                 ?: throw IOException("Respons katalog Live TV kosong.")
             try {
-                json.decodeFromString<LiveCatalogDto>(body)
+                json.decodeFromStream<LiveCatalogDto>(stream)
             } catch (error: Exception) {
                 throw IOException("Format JSON Live TV tidak sesuai kontrak Bytify.", error)
             }

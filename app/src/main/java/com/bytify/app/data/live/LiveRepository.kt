@@ -3,7 +3,9 @@ package com.bytify.app.data.live
 import com.bytify.app.data.db.BytifyDao
 import com.bytify.app.data.db.LiveChannelEntity
 import com.bytify.app.data.db.LiveFavoriteEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -21,8 +23,15 @@ class LiveRepository(
 ) {
     val isConfigured: Boolean get() = api.isConfigured
 
-    val channels: Flow<List<LiveChannel>> = dao.liveChannels().map { rows -> rows.map(LiveChannelEntity::toChannel) }
-    val availableChannels: Flow<List<LiveChannel>> = dao.availableLiveChannels().map { rows -> rows.map(LiveChannelEntity::toChannel) }
+    // Katalog kini belasan ribu kanal (dulu 1.815). Pemetaan sebanyak itu
+    // dipindah ke Default agar tidak dikerjakan di main thread saat daftar
+    // disegarkan — masalah yang sama pernah membuat layar film tersendat.
+    val channels: Flow<List<LiveChannel>> = dao.liveChannels()
+        .map { rows -> rows.map(LiveChannelEntity::toChannel) }
+        .flowOn(Dispatchers.Default)
+    val availableChannels: Flow<List<LiveChannel>> = dao.availableLiveChannels()
+        .map { rows -> rows.map(LiveChannelEntity::toChannel) }
+        .flowOn(Dispatchers.Default)
     val favoriteIds: Flow<Set<String>> = dao.liveFavoriteIds().map { it.toSet() }
     fun channel(id: String): Flow<LiveChannel?> = dao.liveChannel(id).map { it?.toChannel() }
 

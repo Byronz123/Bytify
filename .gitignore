@@ -23,3 +23,6 @@ backend/live-api/.env
 
 # Cache runtime API LK21 (ditulis ulang tiap jalan; bukan sumber kebenaran)
 backend/api/data/lk21-cache.json
+
+# Catatan jalannya daemon auto-sync (dibuat ulang tiap kali jalan)
+backend/scraper/auto-sync.log

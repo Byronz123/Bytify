@@ -2,6 +2,11 @@
 title Bytify Auto-Sync Engine (Movies + TV Garden)
 cd /d E:\Portofolio\Karya\Bytify\backend\scraper
 
+:: Judul film banyak memakai aksara CJK atau emoji. Tanpa ini, mencetak judul
+:: tersebut ke log Windows gagal dengan galat 'charmap' dan film itu ikut
+:: GAGAL di-scrape.
+set PYTHONIOENCODING=utf-8
+
 :: Semua keluaran dicatat ke berkas supaya bisa diperiksa setelah berjalan
 :: tanpa pengawasan. Berkas log ditimpa tiap kali daemon dimulai.
 set LOG=E:\Portofolio\Karya\Bytify\backend\scraper\auto-sync.log

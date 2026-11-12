@@ -44,7 +44,7 @@ EXCLUDED = [
 
 # Jalur yang persis sama dengan ini bukan halaman film melainkan indeks bagian
 # (mis. etalase serial), jadi tidak boleh ikut terkumpul.
-BUKAN_FILM = {"/nontondrama", "/anime", "/series"}
+BUKAN_FILM = {"/nontondrama", "/anime", "/series", "/privacy-policy", "/cara-install-vpn"}
 
 # Pagar pengaman supaya satu kategori yang aneh tidak membuat penjelajahan
 # berputar tanpa akhir. Jauh di atas kedalaman nyata (~50 halaman).

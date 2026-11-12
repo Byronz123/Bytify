@@ -3,7 +3,9 @@ package com.bytify.app.data.movie
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.decodeFromStream
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -31,6 +33,7 @@ class MovieCatalogApi(
             h.startsWith("192.168.") || h.startsWith("10.") || h.endsWith(".local")
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
     suspend fun fetchCatalog(): MovieCatalogDto = withContext(Dispatchers.IO) {
         if (!isConfigured) {
             throw IllegalStateException(
@@ -55,10 +58,14 @@ class MovieCatalogApi(
             if (!response.isSuccessful) {
                 throw IOException("Server katalog mengembalikan HTTP ${response.code}.")
             }
-            val body = response.body?.string()?.takeIf(String::isNotBlank)
+            // Diurai langsung dari aliran data, TIDAK lewat String.
+            // Katalog kini ~32 MB; memuatnya sebagai String menjadi ~66 MB di
+            // memori (UTF-16) dan terbukti membuat aplikasi mati dengan
+            // OutOfMemoryError sebelum sempat mengurai apa pun.
+            val stream = response.body?.byteStream()
                 ?: throw IOException("Respons katalog kosong.")
             try {
-                json.decodeFromString<MovieCatalogDto>(body)
+                json.decodeFromStream<MovieCatalogDto>(stream)
             } catch (error: Exception) {
                 throw IOException("Format JSON katalog tidak sesuai kontrak Bytify.", error)
             }

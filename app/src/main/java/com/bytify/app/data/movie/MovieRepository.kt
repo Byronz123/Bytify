@@ -98,7 +98,13 @@ class MovieRepository(
     /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */
     suspend fun enrichIfNeeded(movie: Movie) {
         if (!movie.id.startsWith("lk21-")) return
-        if (!movie.isSeries && !movie.overview.startsWith("Tonton ") && movie.overview.isNotBlank()) return
+        // Sinopsis di katalog dipotong (diakhiri "...") agar berkasnya muat di
+        // batas 25 MiB Cloudflare Pages. Halaman detail melengkapinya di sini,
+        // jadi pengguna tetap membaca sinopsis utuh.
+        val terpotong = movie.overview.endsWith("...")
+        if (!movie.isSeries && !terpotong &&
+            !movie.overview.startsWith("Tonton ") && movie.overview.isNotBlank()
+        ) return
         val detailedDto = api.fetchLk21Details(movie.id) ?: return
         val enriched = detailedDto.toMovie()
         dao.upsertMovies(listOf(enriched.toEntity(json, System.currentTimeMillis())))

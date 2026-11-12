@@ -94,12 +94,22 @@ def subtitle_lokal(slug):
 # (cast, countries, directors, quality, resolution) tetap tersimpan utuh di
 # bytify_database.json, hanya tidak ikut dikirim ke perangkat agar katalog
 # yang diunduh ponsel tidak membengkak.
+# Cloudflare Pages menolak berkas di atas 25 MiB, dan katalog 25.135 film
+# sempat mencapai 31,6 MB. Dua field dibuang karena murni mubazir:
+#   license      - hanya 1 nilai unik untuk SELURUH katalog; aplikasi memakai
+#                  nilai tetap, jadi mengirimnya 25.135 kali sia-sia.
+#   backdropUrl  - terukur identik dengan posterUrl pada 25.135 dari 25.135
+#                  film; aplikasi jatuh ke posterUrl bila kosong.
 FIELD_KATALOG = {
-    "id", "type", "title", "overview", "posterUrl", "backdropUrl",
+    "id", "type", "title", "overview", "posterUrl",
     "releaseYear", "durationMin", "genres", "rating", "language",
     "videoUrl", "sourceUrl", "servers", "trailerUrl", "subtitles",
-    "episodes", "license",
+    "episodes",
 }
+
+# Sinopsis adalah penyumbang terbesar (8,66 MB, rata-rata 359 karakter).
+# Dipotong agar katalog muat; halaman detail melengkapinya saat dibuka.
+PANJANG_SINOPSIS_KATALOG = int(os.environ.get("BYTIFY_SINOPSIS_MAKS", "150") or 150)
 
 
 def rampingkan_dto(dto):
@@ -108,8 +118,15 @@ def rampingkan_dto(dto):
     Setiap field MovieDto punya nilai bawaan, jadi field yang hilang
     diperlakukan sama dengan field bernilai kosong oleh aplikasi.
     """
-    return {k: v for k, v in dto.items()
-            if k in FIELD_KATALOG and v not in (None, "", [], {})}
+    ramping = {k: v for k, v in dto.items()
+               if k in FIELD_KATALOG and v not in (None, "", [], {})}
+    sinopsis = ramping.get("overview")
+    if sinopsis and len(sinopsis) > PANJANG_SINOPSIS_KATALOG:
+        # Dipotong di batas kata terakhir supaya tidak terputus di tengah kata.
+        potong = sinopsis[:PANJANG_SINOPSIS_KATALOG]
+        spasi = potong.rfind(" ")
+        ramping["overview"] = (potong[:spasi] if spasi > 80 else potong).rstrip(" ,.;:") + "..."
+    return ramping
 
 
 db_lock = threading.Lock()

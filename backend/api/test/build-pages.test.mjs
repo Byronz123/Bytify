@@ -36,6 +36,18 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
             'dist film count must equal backend/data/catalog.json',
         );
 
+        // Cloudflare Pages MENOLAK berkas di atas 25 MiB. Pernah terjadi:
+        // katalog 31,6 MB lolos semua uji lalu gagal di langkah terbit.
+        // Dijaga di sini supaya ketahuan sebelum deploy, bukan sesudahnya.
+        const BATAS_MIB = 25;
+        const AMAN_MIB = 24;
+        const ukuranMiB = fs.statSync(builtPath).size / (1024 * 1024);
+        assert.ok(
+            ukuranMiB < AMAN_MIB,
+            `catalog.json ${ukuranMiB.toFixed(2)} MiB melewati ambang aman ${AMAN_MIB} MiB ` +
+                `(Cloudflare Pages menolak di atas ${BATAS_MIB} MiB). Rampingkan katalog dulu.`,
+        );
+
         // Disalin apa adanya: byte-identik dengan sumber.
         assert.ok(
             fs.readFileSync(builtPath).equals(fs.readFileSync(sourcePath)),

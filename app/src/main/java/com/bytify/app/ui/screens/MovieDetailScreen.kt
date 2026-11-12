@@ -46,6 +46,9 @@ import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
 import kotlinx.coroutines.launch
 
+/** Atribusi sumber katalog; dulu dikirim per film padahal nilainya seragam. */
+private const val LISENSI_BAWAAN = "LK21 Stream Adapter"
+
 @Composable
 fun MovieDetailScreen(movieId: String) {
     val app = appState()
@@ -207,7 +210,10 @@ fun MovieDetailScreen(movieId: String) {
             }
         }
 
-        item.license?.let {
+        // Katalog tidak lagi mengirim license: nilainya sama untuk seluruh
+        // katalog, jadi mengirimnya 25.135 kali hanya membuang ruang pada
+        // berkas yang dibatasi 25 MiB. Atribusinya tetap ditampilkan di sini.
+        (item.license ?: LISENSI_BAWAAN).let {
             Text(
                 "Lisensi: $it",
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),

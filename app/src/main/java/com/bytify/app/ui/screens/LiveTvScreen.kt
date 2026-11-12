@@ -119,7 +119,13 @@ fun LiveTvScreen(embedded: Boolean = false) {
         }
     }
 
-    val categories = remember(channels) { channels.map { it.category }.filter(String::isNotBlank).distinct().sorted() }
+    // Satu kanal bisa punya beberapa kategori, disimpan tergabung ("Animation;Comedy").
+    // Kalau gabungan itu dipakai apa adanya, SETIAP kombinasi menjadi chip sendiri —
+    // terukur 207 chip padahal kategori sebenarnya hanya 28, membuat baris filter
+    // praktis tak terpakai. Di sini kategorinya dipipihkan lebih dulu.
+    val categories = remember(channels) {
+        channels.flatMap { it.kategoriList() }.filter(String::isNotBlank).distinct().sorted()
+    }
     val countries = remember(channels) { channels.map { it.country }.filter(String::isNotBlank).distinct().sorted() }
     // Katalog kini 8.681 kanal. Tanpa remember, seluruh daftar disaring ulang
     // pada SETIAP recomposition — termasuk saat menggulir — dan terukur sebagai
@@ -134,7 +140,7 @@ fun LiveTvScreen(embedded: Boolean = false) {
                 else -> true
             }
             val matchesCategory = selectedCategory == "all" ||
-                channel.category.equals(selectedCategory, ignoreCase = true)
+                channel.kategoriList().any { it.equals(selectedCategory, ignoreCase = true) }
             val matchesCountry = selectedCountry == "all" ||
                 channel.country.equals(selectedCountry, ignoreCase = true)
             val matchesQuery = query.isBlank() || channel.name.contains(query, true) ||
@@ -362,7 +368,7 @@ private fun LiveChannelRow(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOf(channel.category, channel.country).filter(String::isNotBlank).joinToString(" · "),
+                    listOf(channel.kategoriRapi(), channel.country).filter(String::isNotBlank).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -407,7 +413,24 @@ private fun LiveChannelRow(
 }
 
 
-private const val LIVE_STATUS_MAX_AGE_MS = 10 * 60 * 1000L
+/**
+ * Berapa lama status kanal masih dianggap berlaku.
+ *
+ * Nilainya dulu 10 menit, yang cocok untuk pemeriksaan stream secara langsung.
+ * Tetapi `checkedAtEpochMs` diisi dengan waktu KATALOG DIBANGUN, dan katalog itu
+ * statis — dibangun saat deploy lalu disajikan berhari-hari. Akibatnya setiap
+ * kanal selalu tampil "Status kedaluwarsa" sepuluh menit setelah penerbitan,
+ * padahal kanalnya baik-baik saja. Ambangnya disetel ke sehari agar sesuai
+ * dengan irama pembangunan katalog.
+ */
+private const val LIVE_STATUS_MAX_AGE_MS = 24 * 60 * 60 * 1000L
+/** Kategori kanal sebagai daftar; sumbernya menggabungkannya dengan titik koma. */
+private fun LiveChannel.kategoriList(): List<String> =
+    category.split(';').map(String::trim).filter(String::isNotEmpty)
+
+/** Label kategori yang enak dibaca: "Animation;Comedy" -> "Animation · Comedy". */
+private fun LiveChannel.kategoriRapi(): String = kategoriList().joinToString(" · ")
+
 private fun LiveChannel.isFresh(nowEpochMs: Long): Boolean =
     checkedAtEpochMs > 0L && nowEpochMs >= checkedAtEpochMs && nowEpochMs - checkedAtEpochMs <= LIVE_STATUS_MAX_AGE_MS
 private fun LiveChannel.isCurrentlyAvailable(nowEpochMs: Long): Boolean = isAvailable && isFresh(nowEpochMs)

@@ -26,3 +26,7 @@ backend/api/data/lk21-cache.json
 
 # Catatan jalannya daemon auto-sync (dibuat ulang tiap kali jalan)
 backend/scraper/auto-sync.log
+
+# Kunci proses & log scrape metadata (lokal, bukan sumber kebenaran)
+backend/data/.build_database.lock
+backend/scraper/scrape-metadata.log

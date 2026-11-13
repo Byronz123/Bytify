@@ -15,6 +15,7 @@ on:
     branches: [main, feature/complete-1.3.0]
     paths:
       - backend/data/catalog.json
+      - backend/data/series_catalog.json
       - backend/data/live_tv_database.json
       - backend/api/**
       - functions/**

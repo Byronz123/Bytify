@@ -340,8 +340,16 @@ kalau ingin angka yang sahih.
 
 ## Pekerjaan yang masih terbuka
 
-- [ ] Jadwalkan daemon:
-      `schtasks /create /tn "Bytify Auto-Sync" /tr "E:\Portofolio\Karya\Bytify\backend\scraper\update_bytify.bat" /sc onlogon /delay 0000:02 /rl limited /f`
+- [x] Daemon dijadwalkan saat login (`schtasks /query /tn "Bytify Auto-Sync"`).
+      Perintahnya WAJIB dijalankan dari terminal Administrator; pemicu onlogon
+      selalu menolak tanpa elevasi ("ERROR: Access is denied").
+      **Format `/delay` adalah `mmmm:ss`, bukan `jam:menit`.** Perintah lama di
+      berkas ini memakai `/delay 0000:02` yang berarti 2 DETIK, bukan 2 menit —
+      terbaca sebagai `PT2S` saat tugasnya diperiksa. Yang benar:
+      `schtasks /create /tn "Bytify Auto-Sync" /tr "E:\Portofolio\Karya\Bytify\backend\scraper\update_bytify.bat" /sc onlogon /delay 0002:00 /rl limited /f`
+- [ ] Tugas terjadwal bawaannya TIDAK berjalan saat laptop memakai baterai
+      (`DisallowStartIfOnBatteries=True`). Kalau daemon tampak tidak pernah
+      jalan, periksa itu dulu sebelum mencurigai skripnya.
 - [ ] Sambungkan Galaxy A36 untuk pengukuran performa yang sahih
 - [ ] `fetch_subtitles.py` belum pernah dijalankan sungguhan (butuh kunci API)
 - [ ] Podcast masih Indonesia saja; radio sudah lintas negara

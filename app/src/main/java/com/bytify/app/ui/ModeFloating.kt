@@ -30,6 +30,23 @@ object ModeFloating {
     /** true selama sebuah layar pemutar video sedang ditampilkan. */
     val adaVideo: StateFlow<Boolean> = _adaVideo.asStateFlow()
 
+    private val _sedangMain = MutableStateFlow(true)
+
+    /** Dipakai MainActivity untuk memilih ikon tombol: jeda atau putar. */
+    val sedangMain: StateFlow<Boolean> = _sedangMain.asStateFlow()
+
+    /**
+     * Kendali pemutar yang sedang aktif.
+     *
+     * Jendela floating Android TIDAK menerima sentuhan pada isi aplikasi —
+     * hanya tombol yang didaftarkan aplikasi ke sistem. Tanpa kendali ini,
+     * video yang dijeda di jendela kecil tidak akan pernah bisa dilanjutkan:
+     * tombolnya ada tetapi tidak tersambung ke apa pun.
+     */
+    @Volatile
+    var kendali: (() -> Unit)? = null
+        private set
+
     @Volatile
     var rasio: Rational = Rational(16, 9)
         private set
@@ -42,12 +59,17 @@ object ModeFloating {
     fun daftarkanVideo(lebar: Int = 16, tinggi: Int = 9) {
         rasio = rasioAman(lebar, tinggi)
         _adaVideo.value = true
-        android.util.Log.i("ModeFloating", "video terdaftar")
     }
 
     fun lepaskanVideo() {
         _adaVideo.value = false
-        android.util.Log.i("ModeFloating", "video dilepas")
+        kendali = null
+    }
+
+    /** Layar pemutar mendaftarkan cara menukar jeda/putar miliknya sendiri. */
+    fun pasangKendali(sedangMain: Boolean, tukar: () -> Unit) {
+        kendali = tukar
+        _sedangMain.value = sedangMain
     }
 
     fun setAktif(nilai: Boolean) {

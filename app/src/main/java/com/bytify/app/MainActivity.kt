@@ -1,8 +1,15 @@
 package com.bytify.app
 
 import android.Manifest
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +20,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
@@ -48,6 +56,16 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             ModeFloating.adaVideo.collect { perbaruiParamsFloating() }
         }
+        // Ikon tombolnya ikut berubah saat pemutaran dijeda atau dilanjutkan.
+        lifecycleScope.launch {
+            ModeFloating.sedangMain.collect { perbaruiParamsFloating() }
+        }
+        ContextCompat.registerReceiver(
+            this,
+            penerimaAksiFloating,
+            IntentFilter(AKSI_TUKAR_PUTAR),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         // Cek pembaruan otomatis paling sering sekali sehari.
         lifecycleScope.launch {
             val s = container.settings.settings.first()
@@ -67,6 +85,22 @@ class MainActivity : ComponentActivity() {
                 BytifyApp(container)
             }
         }
+    }
+
+    /**
+     * Tombol di jendela floating sampai ke sini. Jendela floating tidak
+     * meneruskan sentuhan ke isi aplikasi, jadi inilah satu-satunya jalan
+     * menjeda dan melanjutkan tanpa harus membuka aplikasi lebih dulu.
+     */
+    private val penerimaAksiFloating = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AKSI_TUKAR_PUTAR) ModeFloating.kendali?.invoke()
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(penerimaAksiFloating) }
+        super.onDestroy()
     }
 
     /**
@@ -102,8 +136,26 @@ class MainActivity : ComponentActivity() {
         runCatching { setPictureInPictureParams(bangunParamsFloating()) }
     }
 
+    private fun aksiTukarPutar(): RemoteAction? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        val main = ModeFloating.sedangMain.value
+        val judul = if (main) "Jeda" else "Putar"
+        val ikon = Icon.createWithResource(
+            this,
+            if (main) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+        )
+        val intent = PendingIntent.getBroadcast(
+            this,
+            if (main) 1 else 2,
+            Intent(AKSI_TUKAR_PUTAR).setPackage(packageName),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return RemoteAction(ikon, judul, judul, intent)
+    }
+
     private fun bangunParamsFloating(): PictureInPictureParams {
         val pembangun = PictureInPictureParams.Builder().setAspectRatio(ModeFloating.rasio)
+        aksiTukarPutar()?.let { pembangun.setActions(listOf(it)) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             pembangun.setAutoEnterEnabled(ModeFloating.adaVideo.value)
             // Perubahan ukuran jendela oleh pengguna digambar mulus, bukan
@@ -114,6 +166,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val AKSI_TUKAR_PUTAR = "com.bytify.app.FLOATING_TUKAR_PUTAR"
         private const val UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000L
     }
 }

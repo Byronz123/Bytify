@@ -221,6 +221,22 @@ private fun subtitleKeJson(isi: String): String {
     return cue.append(']').toString()
 }
 
+/** Kirim satu ketukan sungguhan ke tengah WebView (isTrusted === true). */
+private fun ketukTengah(web: WebView) {
+    if (web.width <= 0 || web.height <= 0) return
+    val x = web.width / 2f
+    val y = web.height / 2f
+    val saat = SystemClock.uptimeMillis()
+    val turun = MotionEvent.obtain(saat, saat, MotionEvent.ACTION_DOWN, x, y, 0)
+    val naik = MotionEvent.obtain(saat, saat + 70, MotionEvent.ACTION_UP, x, y, 0)
+    runCatching {
+        web.dispatchTouchEvent(turun)
+        web.dispatchTouchEvent(naik)
+    }
+    turun.recycle()
+    naik.recycle()
+}
+
 private fun ketukOtomatis(web: WebView, sudahMain: AtomicBoolean, percobaan: Int = 0) {
     if (percobaan >= 8 || sudahMain.get()) return
     web.postDelayed({
@@ -561,13 +577,26 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // log: "terdaftar" lalu "dilepas" 16 ms kemudian — sehingga jendela
     // floating nyaris tidak pernah sempat diizinkan. playWhenReady bertahan
     // melintasi buffering dan hanya padam kalau pemutaran benar-benar dijeda.
+    // Tombol jeda/putar di jendela floating. Untuk pemutar langsung ia menukar
+    // playWhenReady; untuk embed ia mengirim ketukan sungguhan ke tengah
+    // WebView, karena pemutar di dalam iframe hanya mengenal sentuhan.
+    var webEmbed by remember(playKey) { mutableStateOf<WebView?>(null) }
     LaunchedEffect(useEmbedPlayer, playKey) {
         if (useEmbedPlayer) {
             videoBerjalan = false
-            return@LaunchedEffect
+            while (true) {
+                val web = webEmbed
+                if (web != null) {
+                    ModeFloating.pasangKendali(videoBerjalan) { ketukTengah(web) }
+                }
+                delay(500)
+            }
         }
         while (true) {
             videoBerjalan = exoPlayer.playWhenReady
+            ModeFloating.pasangKendali(exoPlayer.playWhenReady) {
+                exoPlayer.playWhenReady = !exoPlayer.playWhenReady
+            }
             delay(500)
         }
     }
@@ -682,6 +711,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = {},
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onWebView = { webEmbed = it },
                 )
             }
         } else {
@@ -707,6 +737,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, false) },
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onWebView = { webEmbed = it },
                 )
             }
         } else {
@@ -748,6 +779,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, true) },
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onWebView = { webEmbed = it },
                 )
             }
         } else {
@@ -877,6 +909,7 @@ private fun EmbedVideoStage(
     referer: String? = null,
     subtitleUrl: String? = null,
     onMulaiBerjalan: () -> Unit = {},
+    onWebView: (WebView) -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
@@ -1057,6 +1090,7 @@ private fun EmbedVideoStage(
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
+                            view?.let(onWebView)
                             Log.i(EMBED_TAG, "selesai memuat: $url")
                             view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
                             view?.let { ketukOtomatis(it, sudahMain) }

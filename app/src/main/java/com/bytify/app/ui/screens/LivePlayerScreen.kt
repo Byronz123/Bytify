@@ -206,6 +206,13 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
             bolehFloating = player.playWhenReady
             benarLive = player.isCurrentMediaItemLive ||
                 player.duration == androidx.media3.common.C.TIME_UNSET
+            // Tombol di jendela floating disambungkan ke pemutar ini. Tanpa
+            // sambungan ini, siaran yang dijeda di jendela kecil tidak bisa
+            // dilanjutkan sama sekali: jendela floating tidak meneruskan
+            // sentuhan ke isi aplikasi.
+            ModeFloating.pasangKendali(player.playWhenReady) {
+                player.playWhenReady = !player.playWhenReady
+            }
             delay(500)
         }
     }

@@ -165,10 +165,15 @@ def panen_satu(jalur, sesi=None):
 
     teks = soup.get_text(" ", strip=True)
 
+    # Tahun dijepit ke rentang yang masuk akal. Angka empat digit pertama di
+    # halaman tidak selalu tahun rilis: satu entri sempat terbaca 2045.
     tahun = None
-    m = re.search(r"\b(19\d{2}|20\d{2})\b", teks)
-    if m:
-        tahun = int(m.group(1))
+    batas_atas = time.gmtime().tm_year + 2
+    for m in re.finditer(r"\b(19\d{2}|20\d{2})\b", teks):
+        calon = int(m.group(1))
+        if 1920 <= calon <= batas_atas:
+            tahun = calon
+            break
 
     durasi = None
     m = re.search(r"(\d{2,3})\s*mnt", teks)

@@ -28,7 +28,7 @@ class BytifyApplication : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .okHttpClient(container.okHttp)
         .crossfade(true)
-        .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.2).build() }
+        .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.3).build() }
         .diskCache {
             DiskCache.Builder()
                 .directory(cacheDir.resolve("images"))

@@ -5,7 +5,10 @@ import com.bytify.app.data.db.MovieEntity
 import com.bytify.app.data.db.MovieFavoriteEntity
 import com.bytify.app.data.db.MovieSectionEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
@@ -16,12 +19,16 @@ import kotlinx.serialization.json.Json
 const val KATALOG_MASIH_SEGAR = -1
 
 /** Katalog dianggap usang setelah 3 jam. */
+/** Berapa lama katalog yang sudah diurai ditahan setelah layar terakhir tutup. */
+private const val TAHAN_MS = 60_000L
+
 const val USIA_KATALOG_DEFAULT_MS = 3L * 60 * 60 * 1000
 
 class MovieRepository(
     private val dao: BytifyDao,
     private val api: MovieCatalogApi,
     private val json: Json,
+    private val scope: CoroutineScope,
 ) {
     val isCatalogConfigured: Boolean get() = api.isConfigured
 
@@ -30,6 +37,7 @@ class MovieRepository(
     val movies: Flow<List<Movie>> = dao.movies()
         .map { rows -> rows.map { it.toMovie(json) } }
         .flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.WhileSubscribed(TAHAN_MS, TAHAN_MS), emptyList())
     val favoriteMovies: Flow<List<Movie>> = dao.favoriteMovies()
         .map { rows -> rows.map { it.toMovie(json) } }
         .flowOn(Dispatchers.Default)
@@ -42,6 +50,7 @@ class MovieRepository(
             )
         }
     }.flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.WhileSubscribed(TAHAN_MS, TAHAN_MS), emptyList())
 
     fun movie(id: String): Flow<Movie?> = dao.movie(id).map { it?.toMovie(json) }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -174,158 +175,182 @@ fun MoviesScreen(embedded: Boolean = false) {
         }
     }
 
-    Column(if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Film & Serial", style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    "Katalog hiburan Bytify",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = ::refreshCatalog, enabled = !refreshing && repository.isCatalogConfigured) {
-                if (refreshing || searchingRemote) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui katalog")
+    // Satu daftar saja, seperti Podcast/Radio: kepala ikut menggulung sehingga
+    // film langsung memakai tinggi layar penuh.
+    val kepala: LazyListScope.() -> Unit = {
+      item(key = "kepala") {
+       Column {
+        if (!embedded) {
+            run {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Film & Serial", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    IconButton(onClick = ::refreshCatalog, enabled = !refreshing && repository.isCatalogConfigured) {
+                        if (refreshing || searchingRemote) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui katalog")
+                    }
+                }
             }
         }
 
-        TextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            placeholder = { Text("Cari judul, sinopsis, atau genre…") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            shape = RoundedCornerShape(16.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
+        run {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("Cari judul, sinopsis, atau genre…") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (refreshing || searchingRemote) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else if (embedded && repository.isCatalogConfigured) {
+                        IconButton(onClick = ::refreshCatalog) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui katalog")
+                        }
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                shape = RoundedCornerShape(16.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                ),
+            )
+        }
 
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                FilterChip(
-                    selected = selectedFilter == "all",
-                    onClick = { selectedFilter = "all" },
-                    label = { Text("Semua") },
-                )
-            }
-            items(listOf("movie" to "Film", "series" to "Serial")) { (key, label) ->
-                FilterChip(selected = selectedFilter == key, onClick = { selectedFilter = key }, label = { Text(label) })
-            }
-            item {
-                FilterChip(
-                    selected = selectedFilter == "favorites",
-                    onClick = { selectedFilter = "favorites" },
-                    label = { Text("Favorit") },
-                    leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
-                )
-            }
-            items(sections, key = { it.title }) { section ->
-                FilterChip(
-                    selected = selectedFilter == "section:${section.title}",
-                    onClick = { selectedFilter = "section:${section.title}" },
-                    label = { Text(section.title, maxLines = 1) },
-                )
+        run {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedFilter == "all",
+                        onClick = { selectedFilter = "all" },
+                        label = { Text("Semua") },
+                    )
+                }
+                items(listOf("movie" to "Film", "series" to "Serial")) { (key, label) ->
+                    FilterChip(selected = selectedFilter == key, onClick = { selectedFilter = key }, label = { Text(label) })
+                }
+                item {
+                    FilterChip(
+                        selected = selectedFilter == "favorites",
+                        onClick = { selectedFilter = "favorites" },
+                        label = { Text("Favorit") },
+                        leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
+                    )
+                }
+                items(sections, key = { it.title }) { section ->
+                    FilterChip(
+                        selected = selectedFilter == "section:${section.title}",
+                        onClick = { selectedFilter = "section:${section.title}" },
+                        label = { Text(section.title, maxLines = 1) },
+                    )
+                }
             }
         }
 
         if (!repository.isCatalogConfigured) {
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Backend katalog belum diatur", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Tambahkan movie.catalog.url=http://10.0.2.2:8787/api/catalog.json ke local.properties, " +
-                            "lalu build ulang aplikasi.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            run {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Backend katalog belum diatur", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Tambahkan movie.catalog.url=http://10.0.2.2:8787/api/catalog.json ke local.properties, " +
+                                "lalu build ulang aplikasi.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
 
         syncMessage?.let { message ->
-            Text(
-                message,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (message.contains("gagal", true) || message.contains("belum", true)) {
-                    MaterialTheme.colorScheme.error
-                } else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        if ((refreshing || searchingRemote) && visibleMovies.isEmpty()) {
-            Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = BytifyColors.GoldDeep)
+            run {
+                Text(
+                    message,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (message.contains("gagal", true) || message.contains("belum", true)) {
+                        MaterialTheme.colorScheme.error
+                    } else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        } else if (visibleMovies.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().weight(1f).padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.Movie, null, Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        when {
-                            selectedFilter == "favorites" -> "Belum ada film favorit."
-                            query.isNotBlank() -> "Tidak ada film yang cocok dengan pencarian."
-                            else -> "Katalog film masih kosong."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (repository.isCatalogConfigured) {
-                        OutlinedButton(onClick = ::refreshCatalog, enabled = !refreshing) {
-                            Icon(Icons.Rounded.Refresh, null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Coba sinkronkan")
+        }
+       }
+      }
+    }
+
+    val wadah = if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()
+
+    if (selectedFilter == "all" && query.isBlank() && sections.isNotEmpty() && visibleMovies.isNotEmpty()) {
+        MovieBrowse(
+            movies = movies,
+            sections = sections,
+            history = history,
+            modifier = wadah,
+            kepala = kepala,
+            onOpen = { app.navigate(Routes.movieDetail(it.id)) },
+            onResume = { movie, episodeId -> app.navigate(Routes.moviePlayer(movie.id, episodeId)) },
+        )
+    } else {
+        LazyColumn(
+            modifier = wadah,
+            contentPadding = PaddingValues(bottom = LocalBottomInset.current + 18.dp),
+        ) {
+            kepala()
+            if ((refreshing || searchingRemote) && visibleMovies.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BytifyColors.GoldDeep)
+                    }
+                }
+            } else if (visibleMovies.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Outlined.Movie, null, Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                when {
+                                    selectedFilter == "favorites" -> "Belum ada film favorit."
+                                    query.isNotBlank() -> "Tidak ada film yang cocok dengan pencarian."
+                                    else -> "Katalog film masih kosong."
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (repository.isCatalogConfigured) {
+                                OutlinedButton(onClick = ::refreshCatalog, enabled = !refreshing) {
+                                    Icon(Icons.Rounded.Refresh, null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Coba sinkronkan")
+                                }
+                            }
                         }
                     }
                 }
-            }
-        } else if (selectedFilter == "all" && query.isBlank() && sections.isNotEmpty()) {
-            MovieBrowse(
-                movies = movies,
-                sections = sections,
-                history = history,
-                modifier = Modifier.weight(1f),
-                onOpen = { app.navigate(Routes.movieDetail(it.id)) },
-                onResume = { movie, episodeId -> app.navigate(Routes.moviePlayer(movie.id, episodeId)) },
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 2.dp,
-                    bottom = LocalBottomInset.current + 18.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            } else {
                 items(visibleMovies, key = { it.id }) { movie ->
-                    MovieRow(
-                        movie = movie,
-                        isFavorite = movie.id in favoriteIds,
-                        onClick = { app.navigate(Routes.movieDetail(movie.id)) },
-                        onFavorite = {
-                            scope.launch {
-                                repository.setFavorite(movie, movie.id !in favoriteIds)
-                            }
-                        },
-                    )
+                    Box(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
+                        MovieRow(
+                            movie = movie,
+                            isFavorite = movie.id in favoriteIds,
+                            onClick = { app.navigate(Routes.movieDetail(movie.id)) },
+                            onFavorite = {
+                                scope.launch {
+                                    repository.setFavorite(movie, movie.id !in favoriteIds)
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -384,14 +409,31 @@ private fun MovieBrowse(
     sections: List<com.bytify.app.data.movie.MovieSection>,
     history: List<com.bytify.app.data.db.MovieHistoryEntity>,
     modifier: Modifier,
+    kepala: LazyListScope.() -> Unit,
     onOpen: (Movie) -> Unit,
     onResume: (Movie, String?) -> Unit,
 ) {
-    val byId = remember(movies) { movies.associateBy { it.id } }
-    val episodeOwner = remember(movies) {
-        movies.filter { it.isSeries }.flatMap { s -> s.episodes.map { it.id to s } }.toMap()
+    // Peta 25.135 film dan daftar episodenya dibangun DI LUAR main thread.
+    // `remember` bertahan terhadap recomposition tetapi TIDAK terhadap
+    // perpindahan tab, yang menghancurkan lalu membuat ulang layar ini — jadi
+    // setiap kali membuka Jelajah dulu dibayar dua kali pemindaian penuh atas
+    // 25 ribu film di main thread.
+    data class PetaFilm(
+        val byId: Map<String, Movie> = emptyMap(),
+        val episodeOwner: Map<String, Movie> = emptyMap(),
+    )
+    val peta by produceState(PetaFilm(), movies) {
+        value = withContext(Dispatchers.Default) {
+            PetaFilm(
+                byId = movies.associateBy { it.id },
+                episodeOwner = movies.filter { it.isSeries }
+                    .flatMap { s -> s.episodes.map { it.id to s } }.toMap(),
+            )
+        }
     }
-    val resume = remember(history, byId, episodeOwner) {
+    val byId = peta.byId
+    val episodeOwner = peta.episodeOwner
+    val resume = remember(history, peta) {
         history.filter { it.durationMs <= 0L || it.positionMs < it.durationMs - 15_000L }
             .mapNotNull { h ->
                 byId[h.movieId]?.let { Triple(it, null as String?, h) }
@@ -405,6 +447,7 @@ private fun MovieBrowse(
         contentPadding = PaddingValues(bottom = LocalBottomInset.current + 18.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        kepala()
         if (resume.isNotEmpty()) {
             item(key = "resume") {
                 RailTitle("Lanjutkan menonton")

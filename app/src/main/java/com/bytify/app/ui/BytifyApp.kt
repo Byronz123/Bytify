@@ -43,6 +43,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -142,7 +151,40 @@ fun BytifyApp(container: AppContainer) {
 
     CompositionLocalProvider(LocalAppState provides app, LocalBottomInset provides bottomInset) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { PaperBackground(MaterialTheme.colorScheme.background, Modifier.fillMaxSize().onSizeChanged { sheet.heightPx = it.height.toFloat().coerceAtLeast(1f) }) {
-            NavHost(navController, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize()) {
+            // Perpindahan rute: antar-tab memudar-naik di tempat (arah tidak
+            // bermakna untuk tab), sedangkan masuk ke halaman rinci menggeser
+            // dari kanan dan kembali menggeser balik ke kanan. Durasi dijaga
+            // pendek supaya terasa sigap, bukan lamban.
+            val tabUtama = setOf(Routes.HOME, Routes.SEARCH, Routes.EXPLORE, Routes.LIBRARY)
+            fun AnimatedContentTransitionScope<NavBackStackEntry>.keTab() =
+                initialState.destination.route in tabUtama && targetState.destination.route in tabUtama
+            NavHost(
+                navController,
+                startDestination = Routes.HOME,
+                modifier = Modifier.fillMaxSize(),
+                enterTransition = {
+                    if (keTab()) {
+                        fadeIn(tween(170, easing = LinearEasing))
+                    } else {
+                        fadeIn(tween(160)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 6 }
+                    }
+                },
+                exitTransition = {
+                    if (keTab()) fadeOut(tween(170, easing = LinearEasing))
+                    else fadeOut(tween(140)) + slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 10 }
+                },
+                popEnterTransition = {
+                    if (keTab()) {
+                        fadeIn(tween(170, easing = LinearEasing))
+                    } else {
+                        fadeIn(tween(160)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 10 }
+                    }
+                },
+                popExitTransition = {
+                    if (keTab()) fadeOut(tween(170, easing = LinearEasing))
+                    else fadeOut(tween(160)) + slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 6 }
+                },
+            ) {
                 composable(Routes.HOME) { HomeScreen() }
                 composable(Routes.SEARCH) { SearchScreen() }
                 composable(Routes.MOVIES) { MoviesScreen() }

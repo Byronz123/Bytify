@@ -5,7 +5,10 @@ import com.bytify.app.data.db.LiveChannelEntity
 import com.bytify.app.data.db.LiveFavoriteEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -20,6 +23,7 @@ data class LiveSyncResult(
 class LiveRepository(
     private val dao: BytifyDao,
     private val api: LiveCatalogApi,
+    private val scope: CoroutineScope,
 ) {
     val isConfigured: Boolean get() = api.isConfigured
 
@@ -29,9 +33,11 @@ class LiveRepository(
     val channels: Flow<List<LiveChannel>> = dao.liveChannels()
         .map { rows -> rows.map(LiveChannelEntity::toChannel) }
         .flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.WhileSubscribed(60_000L, 60_000L), emptyList())
     val availableChannels: Flow<List<LiveChannel>> = dao.availableLiveChannels()
         .map { rows -> rows.map(LiveChannelEntity::toChannel) }
         .flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.WhileSubscribed(60_000L, 60_000L), emptyList())
     val favoriteIds: Flow<Set<String>> = dao.liveFavoriteIds().map { it.toSet() }
     fun channel(id: String): Flow<LiveChannel?> = dao.liveChannel(id).map { it?.toChannel() }
 

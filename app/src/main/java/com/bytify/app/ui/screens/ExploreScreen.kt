@@ -1,5 +1,12 @@
 package com.bytify.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,10 +93,14 @@ private sealed interface Load<out T> {
 fun ExploreScreen() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Text("Jelajah", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 16.dp, top = 16.dp))
+        Text(
+            "Jelajah",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 20.dp, top = 6.dp),
+        )
         // Satu pintu untuk konten non-musik: Film, Podcast, Radio, Live TV.
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ExploreTab(Icons.Rounded.Movie, "Film", tab == 0) { tab = 0 }
@@ -97,11 +108,25 @@ fun ExploreScreen() {
             ExploreTab(Icons.Rounded.Radio, "Radio", tab == 2) { tab = 2 }
             ExploreTab(Icons.Rounded.LiveTv, "Live TV", tab == 3) { tab = 3 }
         }
-        when (tab) {
-            0 -> MoviesScreen(embedded = true)
-            1 -> PodcastHome()
-            2 -> RadioHome()
-            else -> LiveTvScreen(embedded = true)
+        // Perpindahan antar-tab digeser searah pilihan. Hanya isi yang masuk
+        // yang dianimasikan; isi lama langsung memudar, supaya dua layar berat
+        // tidak pernah digambar penuh berdampingan.
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val maju = targetState > initialState
+                fadeIn(tween(150)) + slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) {
+                    if (maju) 40 else -40
+                } togetherWith fadeOut(tween(90))
+            },
+            label = "jelajah",
+        ) { terpilih ->
+            when (terpilih) {
+                0 -> MoviesScreen(embedded = true)
+                1 -> PodcastHome()
+                2 -> RadioHome()
+                else -> LiveTvScreen(embedded = true)
+            }
         }
     }
 }

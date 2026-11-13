@@ -121,7 +121,7 @@ fun LiveTvScreen(embedded: Boolean = false) {
             refreshAfterSeconds = result.refreshAfterSeconds
             lastGeneratedAt = result.generatedAtEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
             statusMessage = buildString {
-                append("${result.availableChannels} dari ${result.totalChannels} kanal tersedia. Daftar diperiksa ulang otomatis.")
+                append("${result.availableChannels} kanal tersedia")
                 result.sourceSyncError?.takeIf(String::isNotBlank)?.let { append(" Peringatan sumber: $it") }
             }
         } catch (error: Exception) {
@@ -178,187 +178,202 @@ fun LiveTvScreen(embedded: Boolean = false) {
         }
     }
 
-    Column(if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Live TV", style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    "Kanal yang tersedia saat ini",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = { scope.launch { refreshCatalog() } }, enabled = !refreshing && repository.isConfigured) {
-                if (refreshing) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui daftar kanal")
+    // Model tata letak mengikuti Podcast/Radio: seluruh kepala (pencarian,
+    // chip, catatan) ikut menggulung bersama daftar, sehingga kanal memakai
+    // tinggi layar penuh dan tidak terdesak ke separuh bawah.
+    LazyColumn(
+        modifier = if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding(),
+        contentPadding = PaddingValues(bottom = LocalBottomInset.current + 18.dp),
+    ) {
+        if (!embedded) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Live TV", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { scope.launch { refreshCatalog() } }, enabled = !refreshing && repository.isConfigured) {
+                        if (refreshing) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui daftar kanal")
+                    }
+                }
             }
         }
 
-        TextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            placeholder = { Text("Cari kanal, kategori, atau negara…") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            singleLine = true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
-            shape = RoundedCornerShape(16.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
-        )
+        item {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("Cari kanal, kategori, atau negara…") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (refreshing) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else if (embedded && repository.isConfigured) {
+                        IconButton(onClick = { scope.launch { refreshCatalog() } }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui daftar kanal")
+                        }
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
+                shape = RoundedCornerShape(16.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+            )
+        }
 
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                FilterChip(selected = selectedFilter == "all", onClick = { selectedFilter = "all" }, label = { Text("Semua") })
-            }
-            item {
-                FilterChip(selected = selectedFilter == "available", onClick = { selectedFilter = "available" }, label = { Text("Tersedia") })
-            }
-            item {
-                FilterChip(
-                    selected = selectedFilter == "favorites",
-                    onClick = { selectedFilter = "favorites" },
-                    label = { Text("Favorit") },
-                    leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
-                )
-            }
-            item {
-                val aktif = listOfNotNull(
-                    selectedCategory.takeIf { it != "all" },
-                    selectedCountry.takeIf { it != "all" },
-                )
-                FilterChip(
-                    selected = aktif.isNotEmpty(),
-                    onClick = { filterTerbuka = !filterTerbuka },
-                    label = { Text(if (aktif.isEmpty()) "Kategori & negara" else aktif.joinToString(" · ")) },
-                    trailingIcon = {
-                        Icon(
-                            if (filterTerbuka) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                            null,
-                            Modifier.size(18.dp),
-                        )
-                    },
-                )
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    FilterChip(selected = selectedFilter == "all", onClick = { selectedFilter = "all" }, label = { Text("Semua") })
+                }
+                item {
+                    FilterChip(selected = selectedFilter == "available", onClick = { selectedFilter = "available" }, label = { Text("Tersedia") })
+                }
+                item {
+                    FilterChip(
+                        selected = selectedFilter == "favorites",
+                        onClick = { selectedFilter = "favorites" },
+                        label = { Text("Favorit") },
+                        leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
+                    )
+                }
+                item {
+                    val aktif = listOfNotNull(
+                        selectedCategory.takeIf { it != "all" },
+                        selectedCountry.takeIf { it != "all" },
+                    )
+                    FilterChip(
+                        selected = aktif.isNotEmpty(),
+                        onClick = { filterTerbuka = !filterTerbuka },
+                        label = { Text(if (aktif.isEmpty()) "Kategori & negara" else aktif.joinToString(" · ")) },
+                        trailingIcon = {
+                            Icon(
+                                if (filterTerbuka) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                null,
+                                Modifier.size(18.dp),
+                            )
+                        },
+                    )
+                }
             }
         }
 
         if (filterTerbuka && categories.isNotEmpty()) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    FilterChip(selected = selectedCategory == "all", onClick = { selectedCategory = "all" }, label = { Text("Semua kategori") })
-                }
-                items(categories, key = { it }) { category ->
-                    FilterChip(
-                        selected = selectedCategory == category,
-                        onClick = { selectedCategory = category },
-                        label = { Text(category, maxLines = 1) },
-                    )
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item {
+                        FilterChip(selected = selectedCategory == "all", onClick = { selectedCategory = "all" }, label = { Text("Semua kategori") })
+                    }
+                    items(categories, key = { it }) { category ->
+                        FilterChip(
+                            selected = selectedCategory == category,
+                            onClick = { selectedCategory = category },
+                            label = { Text(category, maxLines = 1) },
+                        )
+                    }
                 }
             }
         }
 
         if (filterTerbuka && countries.isNotEmpty()) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    FilterChip(selected = selectedCountry == "all", onClick = { selectedCountry = "all" }, label = { Text("Semua negara") })
-                }
-                items(countries, key = { it }) { country ->
-                    FilterChip(
-                        selected = selectedCountry == country,
-                        onClick = { selectedCountry = country },
-                        label = { Text(country) },
-                    )
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item {
+                        FilterChip(selected = selectedCountry == "all", onClick = { selectedCountry = "all" }, label = { Text("Semua negara") })
+                    }
+                    items(countries, key = { it }) { country ->
+                        FilterChip(
+                            selected = selectedCountry == country,
+                            onClick = { selectedCountry = country },
+                            label = { Text(country) },
+                        )
+                    }
                 }
             }
         }
 
         if (!repository.isConfigured) {
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Backend Live TV belum diatur", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Tambahkan live.catalog.url=https://HOST/api/live/channels ke local.properties, lalu build ulang aplikasi.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            item {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Backend Live TV belum diatur", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Tambahkan live.catalog.url=https://HOST/api/live/channels ke local.properties, lalu build ulang aplikasi.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
 
-        statusMessage?.let {
-            Text(
-                it,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (it.startsWith("Pembaruan gagal")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        lastGeneratedAt?.let { timestamp ->
-            Text(
-                "Data katalog: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(timestamp))}",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        val catatanKepala = statusMessage
+            ?: lastGeneratedAt?.let {
+                "Data katalog: " +
+                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+            }
+        if (catatanKepala != null) {
+            item {
+                Text(
+                    catatanKepala,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (catatanKepala.startsWith("Pembaruan gagal")) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         if (refreshing && channels.isEmpty()) {
-            Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = BytifyColors.GoldDeep)
+            item {
+                Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = BytifyColors.GoldDeep)
+                }
             }
         } else if (visibleChannels.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().weight(1f).padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.LiveTv, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        when {
-                            selectedFilter == "favorites" -> "Belum ada kanal favorit."
-                            query.isNotBlank() -> "Tidak ada kanal yang cocok."
-                            else -> "Daftar kanal Live TV masih kosong."
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (repository.isConfigured) {
-                        OutlinedButton(onClick = { scope.launch { refreshCatalog() } }, enabled = !refreshing) {
-                            Icon(Icons.Rounded.Refresh, null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Coba perbarui")
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Outlined.LiveTv, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            when {
+                                selectedFilter == "favorites" -> "Belum ada kanal favorit."
+                                query.isNotBlank() -> "Tidak ada kanal yang cocok."
+                                else -> "Daftar kanal Live TV masih kosong."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (repository.isConfigured) {
+                            OutlinedButton(onClick = { scope.launch { refreshCatalog() } }, enabled = !refreshing) {
+                                Icon(Icons.Rounded.Refresh, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Coba perbarui")
+                            }
                         }
                     }
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 6.dp,
-                    bottom = LocalBottomInset.current + 18.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(visibleChannels, key = { it.id }) { channel ->
+            items(visibleChannels, key = { it.id }) { channel ->
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
                     LiveChannelRow(
                         channel = channel,
                         favorite = channel.id in favoriteIds,

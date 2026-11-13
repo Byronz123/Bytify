@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Refresh
@@ -43,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,6 +65,8 @@ import com.bytify.app.ui.LocalBottomInset
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -76,9 +81,25 @@ fun LiveTvScreen(embedded: Boolean = false) {
     val favoriteIds by repository.favoriteIds.collectAsState(initial = emptySet())
 
     var query by rememberSaveable { mutableStateOf("") }
+    // Kotak teks memakai [query] supaya ketikan tampil seketika, tetapi
+    // PENYARINGAN memakai [queryTersaring] yang baru menyusul setelah jeda.
+    // Tanpa ini, setiap huruf menyaring ulang 8.681 kanal di main thread dan
+    // mengetik terasa tersendat.
+    var queryTersaring by remember { mutableStateOf("") }
+    LaunchedEffect(query) {
+        if (query.isEmpty()) queryTersaring = "" else {
+            delay(JEDA_PENCARIAN_MS)
+            queryTersaring = query
+        }
+    }
     var selectedFilter by rememberSaveable { mutableStateOf("all") }
     var selectedCategory by rememberSaveable { mutableStateOf("all") }
     var selectedCountry by rememberSaveable { mutableStateOf("all") }
+    // Kategori & negara disembunyikan secara bawaan. Dengan 28 kategori dan 180
+    // negara, dua baris chip itu memakan separuh layar sebelum satu kanal pun
+    // terlihat. Ringkasannya tetap tampil di tombol, jadi pilihan aktif tidak
+    // pernah tersembunyi.
+    var filterTerbuka by rememberSaveable { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var refreshAfterSeconds by remember { mutableIntStateOf(300) }
@@ -130,23 +151,30 @@ fun LiveTvScreen(embedded: Boolean = false) {
     // Katalog kini 8.681 kanal. Tanpa remember, seluruh daftar disaring ulang
     // pada SETIAP recomposition — termasuk saat menggulir — dan terukur sebagai
     // jank 40,7% dengan persentil-90 61 ms di layar ini.
-    val visibleChannels = remember(
-        channels, selectedFilter, selectedCategory, selectedCountry, query, favoriteIds, nowEpochMs,
+    // Sama seperti layar film: penyaringan 8.681 kanal dijalankan di luar main
+    // thread supaya mengetik di kotak cari tidak membekukan antarmuka.
+    val visibleChannels by produceState(
+        initialValue = emptyList<LiveChannel>(),
+        channels, selectedFilter, selectedCategory, selectedCountry, queryTersaring, favoriteIds, nowEpochMs,
     ) {
-        channels.filter { channel ->
-            val matchesFilter = when (selectedFilter) {
-                "available" -> channel.isCurrentlyAvailable(nowEpochMs)
-                "favorites" -> channel.id in favoriteIds
-                else -> true
+        value = withContext(Dispatchers.Default) {
+            channels.filter { channel ->
+                val matchesFilter = when (selectedFilter) {
+                    "available" -> channel.isCurrentlyAvailable(nowEpochMs)
+                    "favorites" -> channel.id in favoriteIds
+                    else -> true
+                }
+                val matchesCategory = selectedCategory == "all" ||
+                    channel.kategoriList().any { it.equals(selectedCategory, ignoreCase = true) }
+                val matchesCountry = selectedCountry == "all" ||
+                    channel.country.equals(selectedCountry, ignoreCase = true)
+                val matchesQuery = queryTersaring.isBlank() ||
+                    channel.name.contains(queryTersaring, true) ||
+                    channel.category.contains(queryTersaring, true) ||
+                    channel.country.contains(queryTersaring, true) ||
+                    channel.description.contains(queryTersaring, true)
+                matchesFilter && matchesCategory && matchesCountry && matchesQuery
             }
-            val matchesCategory = selectedCategory == "all" ||
-                channel.kategoriList().any { it.equals(selectedCategory, ignoreCase = true) }
-            val matchesCountry = selectedCountry == "all" ||
-                channel.country.equals(selectedCountry, ignoreCase = true)
-            val matchesQuery = query.isBlank() || channel.name.contains(query, true) ||
-                channel.category.contains(query, true) || channel.country.contains(query, true) ||
-                channel.description.contains(query, true)
-            matchesFilter && matchesCategory && matchesCountry && matchesQuery
         }
     }
 
@@ -205,9 +233,27 @@ fun LiveTvScreen(embedded: Boolean = false) {
                     leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
                 )
             }
+            item {
+                val aktif = listOfNotNull(
+                    selectedCategory.takeIf { it != "all" },
+                    selectedCountry.takeIf { it != "all" },
+                )
+                FilterChip(
+                    selected = aktif.isNotEmpty(),
+                    onClick = { filterTerbuka = !filterTerbuka },
+                    label = { Text(if (aktif.isEmpty()) "Kategori & negara" else aktif.joinToString(" · ")) },
+                    trailingIcon = {
+                        Icon(
+                            if (filterTerbuka) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            null,
+                            Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
         }
 
-        if (categories.isNotEmpty()) {
+        if (filterTerbuka && categories.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -225,7 +271,7 @@ fun LiveTvScreen(embedded: Boolean = false) {
             }
         }
 
-        if (countries.isNotEmpty()) {
+        if (filterTerbuka && countries.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -423,6 +469,9 @@ private fun LiveChannelRow(
  * padahal kanalnya baik-baik saja. Ambangnya disetel ke sehari agar sesuai
  * dengan irama pembangunan katalog.
  */
+/** Jeda sebelum ketikan dipakai menyaring; cukup untuk satu kata, tak terasa lambat. */
+private const val JEDA_PENCARIAN_MS = 250L
+
 private const val LIVE_STATUS_MAX_AGE_MS = 24 * 60 * 60 * 1000L
 /** Kategori kanal sebagai daftar; sumbernya menggabungkannya dengan titik koma. */
 private fun LiveChannel.kategoriList(): List<String> =

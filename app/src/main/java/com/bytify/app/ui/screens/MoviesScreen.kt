@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,8 +61,13 @@ import com.bytify.app.ui.LocalBottomInset
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+
+/** Jeda sebelum ketikan dipakai menyaring katalog film. */
+private const val JEDA_PENCARIAN_FILM_MS = 250L
 
 @Composable
 fun MoviesScreen(embedded: Boolean = false) {
@@ -75,6 +81,15 @@ fun MoviesScreen(embedded: Boolean = false) {
     val history by repository.history.collectAsState(initial = emptyList())
 
     var query by rememberSaveable { mutableStateOf("") }
+    // Ketikan tampil seketika lewat [query]; penyaringan 25.135 film memakai
+    // [queryTersaring] yang menyusul setelah jeda, supaya mengetik tidak berat.
+    var queryTersaring by remember { mutableStateOf("") }
+    LaunchedEffect(query) {
+        if (query.isEmpty()) queryTersaring = "" else {
+            delay(JEDA_PENCARIAN_FILM_MS)
+            queryTersaring = query
+        }
+    }
     var selectedFilter by rememberSaveable { mutableStateOf("all") }
     var refreshing by remember { mutableStateOf(false) }
     var searchingRemote by remember { mutableStateOf(false) }
@@ -140,12 +155,22 @@ fun MoviesScreen(embedded: Boolean = false) {
         selectedFilter.removePrefix("section:").takeIf { selectedFilter.startsWith("section:") }
             ?.let { selectedTitle -> sections.firstOrNull { it.title == selectedTitle }?.movieIds?.toSet() }
     }
-    val visibleMovies = remember(source, query, sectionIds) {
-        source.filter { movie ->
-            val matchesQuery = query.isBlank() || movie.title.contains(query, true) ||
-                movie.overview.contains(query, true) || movie.genres.any { it.contains(query, true) }
-            val matchesSection = sectionIds == null || movie.id in sectionIds
-            matchesQuery && matchesSection
+    // Penyaringan 25.135 film dijalankan DI LUAR main thread. Terukur di Galaxy
+    // A36: sekali jalan memakan ~600 ms, yang muncul sebagai satu pembekuan saat
+    // mengetik. produceState membiarkan daftar lama tampil sampai hasil baru siap.
+    val visibleMovies by produceState(
+        initialValue = emptyList<Movie>(),
+        source, queryTersaring, sectionIds,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            source.filter { movie ->
+                val matchesQuery = queryTersaring.isBlank() ||
+                    movie.title.contains(queryTersaring, true) ||
+                    movie.overview.contains(queryTersaring, true) ||
+                    movie.genres.any { it.contains(queryTersaring, true) }
+                val matchesSection = sectionIds == null || movie.id in sectionIds
+                matchesQuery && matchesSection
+            }
         }
     }
 

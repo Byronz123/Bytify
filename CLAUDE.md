@@ -18,10 +18,11 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 | Bagian | Jumlah | Catatan |
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
+| Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
 | Podcast teratas | 100 | batas Apple RSS |
-| Stasiun radio | 500 | per kueri |
+| Stasiun radio | 500 | per kueri, per negara; lintas dunia |
 
 ---
 
@@ -37,6 +38,14 @@ backend/scraper/ultimate_scraper.py    Selenium + undetected-chromedriver;
 backend/scraper/build_database.py      bytify_database.json -> catalog.json (ramping)
 backend/scraper/tv_garden_scraper.py   katalog Live TV dari API iptv-org (bukan
                                        lagi mengikis tv.garden dengan Selenium)
+backend/scraper/series_scraper.py        penjelajah + pemanen SERIAL. Serial TIDAK ada
+                                       di domain film: /series & /nontondrama di
+                                       LK21 cuma halaman pengalih. Katalog serial
+                                       yang asli ada di tv.nontondrama.vip, dengan
+                                       struktur kategori yang sama. Tanpa Selenium.
+                                       Mode "segarkan" dipakai daemon.
+backend/scraper/build_series_catalog.py  series_database.json -> series_catalog.json
+backend/scraper/series_links.txt         5.143 URL serial hasil sapuan
 backend/scraper/fetch_subtitles.py     OpenSubtitles + TMDB -> backend/data/subtitles/
 backend/scraper/auto_sync_daemon.py    crawl -> build -> Live TV -> commit & push
 backend/scraper/update_bytify.bat      pembungkus daemon; menyetel PYTHONIOENCODING
@@ -51,6 +60,9 @@ backend/data/bytify_database.json      hasil scraping, 25.135 entri (38 MB);
                                        Cadangan lama di
                                        E:\Portofolio\Karya\bytify-cadangan\
 backend/data/catalog.json              yang diunduh APK: 23,26 MiB
+backend/data/series_database.json      hasil panen serial, 4.919 entri (17,8 MB);
+                                       TIDAK dilacak git
+backend/data/series_catalog.json       yang diunduh APK: 12,71 MiB
 backend/data/live_tv_database.json     katalog kanal: 1,99 MiB
 
 backend/api/                           API Node (server.mjs, src/movies.mjs, src/live.mjs)
@@ -71,9 +83,14 @@ app/src/main/java/com/bytify/app/
   ui/screens/MoviePlayerScreen.kt      WebView, bypass gerbang iklan, subtitle
   ui/screens/HomeScreen.kt             mix personal acak, album, grid 2 baris
   ui/components/BottomBars.kt          navigasi indeks pecahan mengikuti jari
+  ui/BytifyApp.kt                      LAPISAN TAB: keempat layar tab ditahan hidup
+  ui/screens/ExploreScreen.kt          SearchField bersama (Film/Live TV/Podcast/Radio)
 ```
 
-Katalog di-host di Cloudflare Pages: `https://bytify-api.pages.dev/api/catalog.json`
+Katalog di-host di Cloudflare Pages:
+- film `https://bytify-api.pages.dev/api/catalog.json`
+- serial `https://bytify-api.pages.dev/api/series.json`
+- live TV `https://bytify-api.pages.dev/api/live/channels.json`
 
 ---
 
@@ -105,6 +122,36 @@ Yang membuatnya muat, dan jangan dibatalkan tanpa alasan:
   UI sudah jatuh ke poster.
 - Sinopsis dipotong `PANJANG_SINOPSIS_KATALOG` (150) — halaman detail
   melengkapinya lewat `enrichIfNeeded`, yang dipicu oleh akhiran "...".
+
+### 3b. Serial terbit sebagai berkas SENDIRI, bukan digabung ke catalog.json
+
+65.296 episode tidak akan muat di sisa ruang catalog.json yang sudah 23,26 MiB.
+`series_catalog.json` 12,71 MiB terbit ke `/api/series.json`; `MovieCatalogApi`
+menurunkan URL-nya dari URL katalog film, jadi tidak ada setelan baru di
+local.properties. `fetchSeriesCatalog()` mengembalikan null (bukan melempar)
+kalau berkasnya belum ada, supaya APK lama tetap jalan.
+
+Sinopsis serial TIDAK dipotong. Pemotongan pada film aman karena dilengkapi
+`enrichIfNeeded`, tapi jalur itu hanya untuk id berawalan "lk21-"; serial
+memakai siput situsnya sendiri. Server alternatif per episode dibuang — pemutar
+memakai `episode.videoUrl` dengan `movie.sourceUrl` sebagai Referer.
+
+### 3c. Keempat layar tab ditahan hidup; NavHost tidak lagi memuatnya
+
+NavHost membongkar lalu membangun ulang tujuannya setiap kali tab ditekan.
+Terukur di Galaxy A36: 85-101 ms persentil-90 PER PINDAH, sama besar bahkan
+untuk tab yang tidak menyentuh katalog film — jadi penyebabnya struktur
+navigasi, bukan data. Sekarang keempat tab ada di lapisan sendiri di
+`BytifyApp.kt`; tujuan tab di NavHost kosong, dan NavHost hanya mengurus
+halaman rinci dengan latar buram yang memudar.
+
+Lapisan tab yang tidak aktif memakai `Modifier.disimpan()`: DIUKUR dengan
+batasan penuh (daftar di dalamnya menyimpan komposisi dan posisi gulir) tetapi
+TIDAK ditempatkan. Yang tidak ditempatkan tidak digambar dan tidak ikut uji
+sentuh. Percobaan pertama memakai pointerInput yang menelan sentuhan, dan itu
+MEMATIKAN seluruh tombol navigasi bawah.
+
+Hasil: pindah tab 85-101 ms -> 32-42 ms, jank 15-30% -> 6,9-11,2%.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 
@@ -147,6 +194,23 @@ memakai `json.decodeFromStream`. Jangan dikembalikan ke `decodeFromString`.
 - `RECYCLE_EVERY` menyegarkan browser tiap 150 film; Chrome menggelembung setelah
   ratusan halaman.
 
+### Scraper serial
+
+- Serial ada di **domain lain**. `/series`, `/nontondrama`, `/anime` di LK21
+  hanyalah halaman pengalih berhitung mundur. `BUKAN_FILM` di `crawler.py`
+  benar melewatinya; katalog serial ada di tv.nontondrama.vip.
+- **Batasi ruang lingkup selector.** `a[href^="/genre/"]` global mengambil menu
+  navigasi situs: versi pertama pemanen memberi "Action, Adventure, Animation"
+  untuk SETIAP serial. Yang benar ada di dalam `.tag-list`.
+  Nilai rating ada di `.rating-score`, bukan `.rating-box` (yang ikut membawa
+  jumlah pemilih). Poster dari `og:image`, bukan `<img>` pertama — halaman
+  serial memuat belasan poster rekomendasi.
+- Berbeda dari halaman daftar film, URL episode di luar jangkauan di situs ini
+  MENGEMBALIKAN 404 betulan. Jadi jumlah episode ditelusuri sampai 404, bukan
+  ditebak dari kartu daftar yang bisa basi untuk serial ongoing.
+- Daemon memanen ulang HANYA serial baru dan yang berstatus "Ongoing". Serial
+  "Complete" tidak pernah bertambah episodenya.
+
 ### Proses di Windows
 
 - **`pkill` dari Git Bash TIDAK mematikan proses Windows.** Pakai PowerShell
@@ -173,6 +237,17 @@ memakai `json.decodeFromStream`. Jangan dikembalikan ke `decodeFromString`.
   dalam iframe lintas-origin; yang disimpan adalah daftar `servers`.
 - URL sampah `donasi.assetsy.de/stopjudi/*.mp4` disaring `isJunkMediaUrl()` di
   `cleanUrlOrNull()`. Jangan dilonggarkan.
+- **Satu LazyColumn untuk tampilan bawaan DAN hasil pencarian.** Dulu keduanya
+  pohon komposisi berbeda, jadi huruf pertama yang diketik menukar seluruh
+  pohon: kolom cari kehilangan identitasnya, fokus lepas, papan ketik menutup
+  sendiri.
+- **Teks petunjuk kolom cari harus `maxLines = 1`.** Teks panjang membungkus
+  jadi dua baris dan membuat kolom TERLIHAT dua kali lebih tinggi daripada
+  kolom yang sama di Radio, padahal tingginya identik (68px vs 136px terukur).
+  Film, Live TV, Podcast, dan Radio kini memakai `SearchField` yang sama.
+- Deret "Film Terbaru <tahun>" dibentuk aplikasi dari tahun perangkat, bukan
+  dari judul bagian di katalog, supaya ikut berganti sendiri saat tahun baru.
+  Bagian katalog berjudul sama dilewati agar tidak muncul dua kali.
 - Status kanal Live TV menandakan **kesegaran data**, bukan hasil pengecekan
   stream. `isAvailable` selalu true dari server; `LIVE_STATUS_MAX_AGE_MS` disetel
   sehari agar cocok dengan irama katalog yang statis.
@@ -188,6 +263,8 @@ memakai `json.decodeFromStream`. Jangan dikembalikan ke `decodeFromString`.
 | radio-browser | tak terbatas; Indonesia punya 505 stasiun |
 | iptv-org | 18.605 stream -> 8.681 kanal unik HTTPS non-NSFW |
 | LK21 | 62 kategori, 25.204 URL film |
+| tv.nontondrama.vip | 40 kategori, 5.143 URL serial -> 4.919 serial |
+| radio-browser (negara) | daftar `countrycodes`; US 7.082, DE 5.649 stasiun |
 
 Katalog lagu dipanen dari **110 negara** Apple RSS (dua umpan: `songs` dan
 `music-videos`) ditambah **67 kueri benih YouTube** lewat NewPipe. Apple membatasi
@@ -267,6 +344,6 @@ kalau ingin angka yang sahih.
       `schtasks /create /tn "Bytify Auto-Sync" /tr "E:\Portofolio\Karya\Bytify\backend\scraper\update_bytify.bat" /sc onlogon /delay 0000:02 /rl limited /f`
 - [ ] Sambungkan Galaxy A36 untuk pengukuran performa yang sahih
 - [ ] `fetch_subtitles.py` belum pernah dijalankan sungguhan (butuh kunci API)
-- [ ] Podcast & radio masih Indonesia saja; bisa dilebarkan multi-negara seperti lagu
+- [ ] Podcast masih Indonesia saja; radio sudah lintas negara
 - [ ] Status kanal Live TV belum memverifikasi stream hidup/mati
 - [ ] Animasi navigasi belum dibandingkan bingkai-per-bingkai dengan video acuan

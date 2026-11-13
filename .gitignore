@@ -1,4 +1,4 @@
-.gradle/
+﻿.gradle/
 build/
 app/build/
 backend/api/dist/
@@ -16,6 +16,8 @@ backend/data/bytify_database.json
 # Hasil panen serial mentah (berisi server alternatif per episode); yang
 # diterbitkan adalah series_catalog.json yang sudah diramping.
 backend/data/series_database.json
+# Berkas sementara penulisan atomik; tertinggal kalau proses panen dimatikan.
+backend/data/series_database.json.*.tmp
 
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/
@@ -33,3 +35,4 @@ backend/scraper/auto-sync.log
 # Kunci proses & log scrape metadata (lokal, bukan sumber kebenaran)
 backend/data/.build_database.lock
 backend/scraper/scrape-metadata.log
+

@@ -45,3 +45,6 @@ backend/data/film_indonesia_database.json.*.tmp
 # Kunci API TMDB dan rahasia scraper lain.
 backend/scraper/.env
 backend/scraper/.env.*
+
+# Katalog uji sementara untuk mencoba sumber pemutar baru.
+backend/api/dist-uji/

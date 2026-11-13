@@ -63,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bytify.app.data.remote.Episode
 import com.bytify.app.data.remote.Podcast
+import com.bytify.app.data.remote.NegaraRadio
 import com.bytify.app.data.remote.RadioGenres
 import com.bytify.app.data.remote.RadioStation
 import com.bytify.app.ui.LocalBottomInset
@@ -150,16 +152,29 @@ private fun ExploreTab(icon: androidx.compose.ui.graphics.vector.ImageVector, la
 
 /** Kolom pencarian bersama; mencari otomatis setelah jeda mengetik. */
 @Composable
-private fun SearchField(query: String, onQuery: (String) -> Unit, placeholder: String) {
+internal fun SearchField(
+    query: String,
+    onQuery: (String) -> Unit,
+    placeholder: String,
+    sibuk: Boolean = false,
+    onFokus: (Boolean) -> Unit = {},
+) {
     val focus = LocalFocusManager.current
     TextField(
         value = query,
         onValueChange = onQuery,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        placeholder = { Text(placeholder) },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            .onFocusChanged { onFokus(it.isFocused) },
+        // Satu baris, dipotong kalau kepanjangan. Teks petunjuk yang membungkus
+        // jadi dua baris membuat kolom cari TERLIHAT dua kali lebih tinggi
+        // daripada kolom yang sama di Radio, padahal tingginya identik.
+        placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Rounded.Search, null) },
         trailingIcon = {
-            if (query.isNotEmpty()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Rounded.Close, "Hapus") }
+            when {
+                sibuk -> CircularProgressIndicator(Modifier.padding(end = 14.dp).size(20.dp), strokeWidth = 2.dp)
+                query.isNotEmpty() -> IconButton(onClick = { onQuery("") }) { Icon(Icons.Rounded.Close, "Hapus") }
+            }
         },
         singleLine = true,
         shape = RoundedCornerShape(16.dp),
@@ -294,18 +309,27 @@ private fun RadioHome() {
     val favorites by repo.favorites.collectAsState(initial = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var genre by rememberSaveable { mutableStateOf<String?>(null) }
+    // null = seluruh dunia. Layar ini dulu dipatok "ID", sehingga direktori
+    // radio-browser yang sebenarnya mendunia hanya tampil sebagai katalog
+    // Indonesia.
+    var negara by rememberSaveable { mutableStateOf<String?>("ID") }
     var attempt by remember { mutableIntStateOf(0) }
     var stations by remember { mutableStateOf<Load<List<RadioStation>>>(Load.Loading) }
+    var daftarNegara by remember { mutableStateOf<List<NegaraRadio>>(emptyList()) }
 
-    LaunchedEffect(query, genre, attempt) {
+    LaunchedEffect(Unit) {
+        daftarNegara = runCatching { repo.negara() }.getOrDefault(emptyList())
+    }
+
+    LaunchedEffect(query, genre, negara, attempt) {
         val q = query.trim()
         if (q.isNotEmpty()) delay(450)
         stations = Load.Loading
         stations = runCatching {
             when {
                 q.isNotEmpty() -> repo.search(q)
-                genre != null -> repo.byTag(genre!!)
-                else -> repo.popular()
+                genre != null -> repo.byTag(genre!!, negara)
+                else -> repo.popular(negara)
             }
         }.fold({ Load.Ready(it) }, { Load.Failed })
     }
@@ -319,6 +343,20 @@ private fun RadioHome() {
                     items(RadioGenres) { (label, tag) -> GenreChip(label, genre == tag) { genre = tag } }
                 }
             }
+            if (daftarNegara.isNotEmpty()) {
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        item { GenreChip("Dunia", negara == null) { negara = null } }
+                        item { GenreChip("Indonesia", negara == "ID") { negara = "ID" } }
+                        items(daftarNegara.filter { it.kode != "ID" }, key = { it.kode }) { satu ->
+                            GenreChip("${satu.kode} (${satu.jumlah})", negara == satu.kode) { negara = satu.kode }
+                        }
+                    }
+                }
+            }
             if (favorites.isNotEmpty() && genre == null) {
                 item { SectionHeader("Stasiun favorit") }
                 items(favorites, key = { "fav-" + it.id }) { StationRow(it, favorites, true) }
@@ -329,7 +367,9 @@ private fun RadioHome() {
                 when {
                     query.isNotBlank() -> "Hasil pencarian"
                     genre != null -> RadioGenres.first { it.second == genre }.first
-                    else -> "Populer di Indonesia"
+                    negara == null -> "Populer sedunia"
+                    negara == "ID" -> "Populer di Indonesia"
+                    else -> "Populer di $negara"
                 },
             )
         }

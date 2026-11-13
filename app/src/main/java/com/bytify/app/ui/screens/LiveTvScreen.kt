@@ -22,8 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LiveTv
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Refresh
@@ -36,6 +34,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -95,11 +95,6 @@ fun LiveTvScreen(embedded: Boolean = false) {
     var selectedFilter by rememberSaveable { mutableStateOf("all") }
     var selectedCategory by rememberSaveable { mutableStateOf("all") }
     var selectedCountry by rememberSaveable { mutableStateOf("all") }
-    // Kategori & negara disembunyikan secara bawaan. Dengan 28 kategori dan 180
-    // negara, dua baris chip itu memakan separuh layar sebelum satu kanal pun
-    // terlihat. Ringkasannya tetap tampil di tombol, jadi pilihan aktif tidak
-    // pernah tersembunyi.
-    var filterTerbuka by rememberSaveable { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var refreshAfterSeconds by remember { mutableIntStateOf(300) }
@@ -144,10 +139,42 @@ fun LiveTvScreen(embedded: Boolean = false) {
     // Kalau gabungan itu dipakai apa adanya, SETIAP kombinasi menjadi chip sendiri —
     // terukur 207 chip padahal kategori sebenarnya hanya 28, membuat baris filter
     // praktis tak terpakai. Di sini kategorinya dipipihkan lebih dulu.
-    val categories = remember(channels) {
-        channels.flatMap { it.kategoriList() }.filter(String::isNotBlank).distinct().sorted()
+
+    // Etalase kanal mengikuti bentuk layar Film: satu deret mendatar per
+    // kategori, bukan satu daftar 8.681 baris yang harus digulir buta.
+    val deretKategori by produceState(emptyList<DeretKanal>(), channels) {
+        value = withContext(Dispatchers.Default) {
+            val ember = HashMap<String, MutableList<LiveChannel>>()
+            channels.forEach { kanal ->
+                kanal.kategoriList().forEach { mentah ->
+                    val kategori = mentah.trim()
+                    if (kategori.isNotEmpty()) ember.getOrPut(kategori) { mutableListOf() }.add(kanal)
+                }
+            }
+            ember.entries
+                .filter { it.value.size >= BATAS_DERET_KANAL }
+                .sortedByDescending { it.value.size }
+                .map { (kategori, isi) ->
+                    DeretKanal(kategori, isi.take(ISI_DERET_KANAL), isi.size)
+                }
+        }
     }
-    val countries = remember(channels) { channels.map { it.country }.filter(String::isNotBlank).distinct().sorted() }
+
+    // Negara yang ditawarkan saat sebuah kategori dibuka hanya negara yang
+    // benar-benar punya kanal di kategori itu. Daftar 180 negara penuh akan
+    // sebagian besar berujung "tidak ada kanal yang cocok".
+    val negaraKategori by produceState(emptyList<String>(), channels, selectedCategory) {
+        val kategori = selectedCategory
+        value = withContext(Dispatchers.Default) {
+            if (kategori == "all") emptyList()
+            else channels
+                .filter { kanal -> kanal.kategoriList().any { it.equals(kategori, true) } }
+                .map { it.country }
+                .filter(String::isNotBlank)
+                .distinct()
+                .sorted()
+        }
+    }
     // Katalog kini 8.681 kanal. Tanpa remember, seluruh daftar disaring ulang
     // pada SETIAP recomposition — termasuk saat menggulir — dan terukur sebagai
     // jank 40,7% dengan persentil-90 61 ms di layar ini.
@@ -178,6 +205,9 @@ fun LiveTvScreen(embedded: Boolean = false) {
         }
     }
 
+    val etalase = selectedFilter == "all" && selectedCategory == "all" &&
+        selectedCountry == "all" && query.isBlank() && deretKategori.isNotEmpty()
+
     // Model tata letak mengikuti Podcast/Radio: seluruh kepala (pencarian,
     // chip, catatan) ikut menggulung bersama daftar, sehingga kanal memakai
     // tinggi layar penuh dan tidak terdesak ke separuh bawah.
@@ -201,30 +231,11 @@ fun LiveTvScreen(embedded: Boolean = false) {
         }
 
         item {
-            TextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                placeholder = { Text("Cari kanal, kategori, atau negara…") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (refreshing) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else if (embedded && repository.isConfigured) {
-                        IconButton(onClick = { scope.launch { refreshCatalog() } }) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui daftar kanal")
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Search),
-                shape = RoundedCornerShape(16.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                ),
+            SearchField(
+                query = query,
+                onQuery = { query = it },
+                placeholder = "Cari kanal TV…",
+                sibuk = refreshing,
             )
         }
 
@@ -247,61 +258,50 @@ fun LiveTvScreen(embedded: Boolean = false) {
                         leadingIcon = { Icon(Icons.Rounded.Favorite, null, Modifier.size(16.dp)) },
                     )
                 }
-                item {
-                    val aktif = listOfNotNull(
-                        selectedCategory.takeIf { it != "all" },
-                        selectedCountry.takeIf { it != "all" },
-                    )
-                    FilterChip(
-                        selected = aktif.isNotEmpty(),
-                        onClick = { filterTerbuka = !filterTerbuka },
-                        label = { Text(if (aktif.isEmpty()) "Kategori & negara" else aktif.joinToString(" · ")) },
-                        trailingIcon = {
-                            Icon(
-                                if (filterTerbuka) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                null,
-                                Modifier.size(18.dp),
-                            )
-                        },
-                    )
-                }
-            }
-        }
-
-        if (filterTerbuka && categories.isNotEmpty()) {
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                // Kategori yang sedang dibuka lewat "Lihat semua" tampil sebagai
+                // chip aktif yang bisa dilepas, jadi pengguna tahu sedang di mana.
+                if (selectedCategory != "all") {
                     item {
-                        FilterChip(selected = selectedCategory == "all", onClick = { selectedCategory = "all" }, label = { Text("Semua kategori") })
-                    }
-                    items(categories, key = { it }) { category ->
                         FilterChip(
-                            selected = selectedCategory == category,
-                            onClick = { selectedCategory = category },
-                            label = { Text(category, maxLines = 1) },
+                            selected = true,
+                            onClick = { selectedCategory = "all"; selectedCountry = "all" },
+                            label = { Text(selectedCategory, maxLines = 1) },
+                            trailingIcon = { Icon(Icons.Rounded.Close, "Keluar dari kategori", Modifier.size(16.dp)) },
                         )
                     }
                 }
             }
         }
 
-        if (filterTerbuka && countries.isNotEmpty()) {
+        // Begitu sebuah kategori dibuka, saringannya adalah NEGARA. Itu yang
+        // masih membedakan kanal di dalam satu kategori; menyodorkan daftar
+        // kategori lagi di sini tidak menyaring apa pun.
+        if (selectedCategory != "all" && negaraKategori.isNotEmpty()) {
+            item {
+                Text(
+                    "Negara",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+                )
+            }
             item {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        FilterChip(selected = selectedCountry == "all", onClick = { selectedCountry = "all" }, label = { Text("Semua negara") })
-                    }
-                    items(countries, key = { it }) { country ->
                         FilterChip(
-                            selected = selectedCountry == country,
-                            onClick = { selectedCountry = country },
-                            label = { Text(country) },
+                            selected = selectedCountry == "all",
+                            onClick = { selectedCountry = "all" },
+                            label = { Text("Semua negara") },
+                        )
+                    }
+                    items(negaraKategori, key = { it }) { negara ->
+                        FilterChip(
+                            selected = selectedCountry == negara,
+                            onClick = { selectedCountry = if (selectedCountry == negara) "all" else negara },
+                            label = { Text(negara) },
                         )
                     }
                 }
@@ -342,7 +342,18 @@ fun LiveTvScreen(embedded: Boolean = false) {
             }
         }
 
-        if (refreshing && channels.isEmpty()) {
+        if (etalase) {
+            items(deretKategori, key = { "kategori:" + it.kategori }) { deret ->
+                DeretKanalMendatar(
+                    deret = deret,
+                    onLihatSemua = { selectedCategory = deret.kategori },
+                    onBuka = { kanal ->
+                        app.container.player.pause()
+                        app.navigate(Routes.livePlayer(kanal.id))
+                    },
+                )
+            }
+        } else if (refreshing && channels.isEmpty()) {
             item {
                 Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = BytifyColors.GoldDeep)
@@ -498,3 +509,91 @@ private fun LiveChannel.kategoriRapi(): String = kategoriList().joinToString(" �
 private fun LiveChannel.isFresh(nowEpochMs: Long): Boolean =
     checkedAtEpochMs > 0L && nowEpochMs >= checkedAtEpochMs && nowEpochMs - checkedAtEpochMs <= LIVE_STATUS_MAX_AGE_MS
 private fun LiveChannel.isCurrentlyAvailable(nowEpochMs: Long): Boolean = isAvailable && isFresh(nowEpochMs)
+
+/** Jumlah kanal minimum agar sebuah kategori layak punya deretnya sendiri. */
+private const val BATAS_DERET_KANAL = 8
+
+/** Banyak kanal yang ditampilkan dalam satu deret mendatar. */
+private const val ISI_DERET_KANAL = 20
+
+private data class DeretKanal(
+    val kategori: String,
+    val kanal: List<LiveChannel>,
+    val jumlah: Int,
+)
+
+/** Satu deret kanal mendatar dengan tombol "Lihat semua", sebentuk dengan Film. */
+@Composable
+private fun DeretKanalMendatar(
+    deret: DeretKanal,
+    onLihatSemua: () -> Unit,
+    onBuka: (LiveChannel) -> Unit,
+) {
+    Column(Modifier.padding(top = 14.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                deret.kategori,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(onClick = onLihatSemua) {
+                Text("Lihat semua")
+                Text(
+                    " (${deret.jumlah})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(deret.kanal, key = { deret.kategori + it.id }) { kanal ->
+                Column(
+                    Modifier.width(104.dp).clickable { onBuka(kanal) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        Modifier.size(104.dp).clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (kanal.logoUrl != null) {
+                            AsyncImage(
+                                model = kanal.logoUrl,
+                                contentDescription = "Logo ${kanal.name}",
+                                modifier = Modifier.fillMaxSize().padding(12.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Outlined.LiveTv,
+                                null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        kanal.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Text(
+                        kanal.country,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}

@@ -55,6 +55,15 @@ data class RadioStation(
     }
 }
 
+/** Satu negara di direktori radio, beserta banyak stasiunnya. */
+data class NegaraRadio(val kode: String, val jumlah: Int)
+
+@Serializable
+private data class ApiNegara(
+    val name: String = "",
+    val stationcount: Int = 0,
+)
+
 /** Genre radio di layar Jelajah: label → tag Radio Browser. */
 val RadioGenres = listOf(
     "Pop" to "pop",
@@ -99,6 +108,9 @@ class RadioRepository(
 
     private val cache = ConcurrentHashMap<String, List<RadioStation>>()
 
+    @Volatile
+    private var cacheNegara: List<NegaraRadio>? = null
+
     val favorites: Flow<List<RadioStation>> = dao.radioFavorites().map { list -> list.map(RadioStation::from) }
 
     suspend fun toggleFavorite(station: RadioStation, favorite: Boolean) {
@@ -111,16 +123,60 @@ class RadioRepository(
      * Dinaikkan ke 500 — cukup memuat satu negara penuh tanpa membuat
      * satu permintaan menjadi terlalu besar.
      */
-    suspend fun popular(country: String = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
-        query("search", mapOf("countrycode" to country, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))
+    /**
+     * [country] null berarti SELURUH DUNIA: parameter countrycode tidak dikirim
+     * sama sekali. Sebelumnya layar radio dipatok "ID", jadi direktori yang
+     * sebenarnya mendunia hanya tampil sebagai katalog Indonesia.
+     */
+    suspend fun popular(country: String? = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
+        query("search", buildMap {
+            if (!country.isNullOrBlank()) put("countrycode", country)
+            put("order", "clickcount")
+            put("reverse", "true")
+            put("limit", "$limit")
+        })
 
-    suspend fun byTag(tag: String, country: String = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
-        query("search", mapOf("countrycode" to country, "tag" to tag, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))
+    suspend fun byTag(tag: String, country: String? = "ID", limit: Int = JUMLAH_STASIUN_MAKS) =
+        query("search", buildMap {
+            if (!country.isNullOrBlank()) put("countrycode", country)
+            put("tag", tag)
+            put("order", "clickcount")
+            put("reverse", "true")
+            put("limit", "$limit")
+        })
 
     suspend fun search(name: String, limit: Int = JUMLAH_STASIUN_MAKS): List<RadioStation> {
         val q = name.trim()
         if (q.isEmpty()) return emptyList()
         return query("search", mapOf("name" to q, "order" to "clickcount", "reverse" to "true", "limit" to "$limit"))
+    }
+
+    /**
+     * Negara yang benar-benar punya stasiun, diurutkan dari yang terbanyak.
+     * Diambil dari radio-browser sendiri supaya daftarnya tidak pernah basi.
+     */
+    suspend fun negara(batas: Int = 40): List<NegaraRadio> = withContext(Dispatchers.IO) {
+        cacheNegara?.let { return@withContext it }
+        for (host in MIRRORS) {
+            try {
+                val url = "https://$host/json/countrycodes".toHttpUrl()
+                val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
+                val mentah = client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) error("Daftar negara gagal dimuat (${response.code})")
+                    json.decodeFromString<List<ApiNegara>>(response.body!!.string())
+                }
+                val hasil = mentah
+                    .filter { it.name.length == 2 && it.stationcount >= 20 }
+                    .sortedByDescending { it.stationcount }
+                    .take(batas)
+                    .map { NegaraRadio(it.name, it.stationcount) }
+                cacheNegara = hasil
+                return@withContext hasil
+            } catch (_: Exception) {
+                // cermin berikutnya
+            }
+        }
+        emptyList()
     }
 
     private suspend fun query(path: String, params: Map<String, String>): List<RadioStation> = withContext(Dispatchers.IO) {
@@ -166,7 +222,10 @@ class RadioRepository(
         )
     }
 
-    fun clearCache() = cache.clear()
+    fun clearCache() {
+        cache.clear()
+        cacheNegara = null
+    }
 
     companion object {
         private val MIRRORS = listOf(

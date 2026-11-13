@@ -94,6 +94,10 @@ fun MoviesScreen(embedded: Boolean = false) {
         }
     }
     var selectedFilter by rememberSaveable { mutableStateOf("all") }
+    // Saran pencarian (genre + tahun) muncul begitu kolom cari disentuh dan
+    // tetap tampil selama masih ada saringan aktif.
+    var cariFokus by remember { mutableStateOf(false) }
+    var tahunTerpilih by rememberSaveable { mutableStateOf<Int?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var searchingRemote by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
@@ -109,11 +113,12 @@ fun MoviesScreen(embedded: Boolean = false) {
                     // Katalog masih baru; tidak perlu unduh ulang berkas penuh.
                     return@launch
                 }
-                syncMessage = if (count == 0) {
-                    "Katalog berhasil diperiksa; belum ada film baru dalam respons."
-                } else {
-                    "$count film berhasil disinkronkan."
-                }
+                // Sinkronisasi yang berhasil TIDAK dilaporkan. Katalog
+                // menyegarkan diri sendiri tiap 3 jam, jadi spanduk "sekian
+                // film berhasil disinkronkan" hanya muncul tanpa diminta dan
+                // menggeser isi daftar. Hanya kegagalan yang perlu diketahui.
+                @Suppress("UNUSED_EXPRESSION")
+                count
             } catch (error: Exception) {
                 syncMessage = error.message ?: "Sinkronisasi katalog gagal."
             } finally {
@@ -153,7 +158,11 @@ fun MoviesScreen(embedded: Boolean = false) {
             selectedFilter == "series" -> movies.filter { it.isSeries }
             selectedFilter.startsWith("genre:") -> {
                 val genre = selectedFilter.removePrefix("genre:")
-                movies.filter { film -> film.genres.any { it.equals(genre, true) } }
+                movies.filter { film -> !film.isSeries && film.genres.any { it.equals(genre, true) } }
+            }
+            selectedFilter.startsWith("serialgenre:") -> {
+                val genre = selectedFilter.removePrefix("serialgenre:")
+                movies.filter { film -> film.isSeries && film.genres.any { it.equals(genre, true) } }
             }
             else -> movies
         }
@@ -165,32 +174,38 @@ fun MoviesScreen(embedded: Boolean = false) {
     // kalau datanya benar-benar ada, supaya tidak ada saringan yang pasti kosong.
     val adaSerial = remember(movies) { movies.any { it.isSeries } }
 
-    // Deret per genre dibangun DI LUAR main thread: 25 ribu film dikelompokkan
-    // ke 29 genre. Tiap deret menyimpan jumlah penuhnya untuk tombol "Lihat semua".
+    // Deret per genre dibangun DI LUAR main thread. Film dan serial dipisah:
+    // keduanya punya etalase sendiri, jadi deret genre serial tidak tercampur
+    // dengan 25 ribu film. Tiap deret menyimpan jumlah penuhnya untuk tombol
+    // "Lihat semua".
     val deretGenre by produceState(emptyList<DeretGenre>(), movies) {
+        value = withContext(Dispatchers.Default) { kelompokkanGenre(movies.filter { !it.isSeries }) }
+    }
+    val deretSerial by produceState(emptyList<DeretGenre>(), movies) {
         value = withContext(Dispatchers.Default) {
-            val ember = HashMap<String, MutableList<Movie>>()
-            movies.forEach { film ->
-                film.genres.forEach { mentah ->
-                    val genre = mentah.trim()
-                    if (genre.isNotEmpty()) ember.getOrPut(genre) { mutableListOf() }.add(film)
-                }
-            }
-            ember.entries
-                .filter { it.value.size >= BATAS_DERET_GENRE }
-                .sortedByDescending { it.value.size }
-                .map { (genre, daftar) ->
-                    DeretGenre(
-                        genre = genre,
-                        film = daftar.sortedWith(
-                            compareByDescending<Movie> { it.releaseYear ?: 0 }
-                                .thenByDescending { it.rating ?: 0.0 },
-                        ).take(ISI_DERET_GENRE),
-                        jumlah = daftar.size,
-                    )
-                }
+            kelompokkanGenre(movies.filter { it.isSeries }, batas = BATAS_DERET_SERIAL)
         }
     }
+
+    // Bagian "Film Terbaru <tahun>" dibentuk dari tahun berjalan perangkat,
+    // bukan dari judul bagian yang ikut di katalog. Begitu tahun berganti,
+    // deretnya ikut berganti sendiri dan film bertahun baru langsung masuk —
+    // tanpa menunggu scraper, deploy, atau APK baru.
+    val tahunIni = remember { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) }
+    // Tahun diambil dari katalognya sendiri, bukan rentang tetap: begitu film
+    // bertahun baru masuk, tahunnya ikut muncul sebagai pilihan.
+    val tahunTersedia by produceState(emptyList<Int>(), movies) {
+        value = withContext(Dispatchers.Default) {
+            movies.mapNotNull { it.releaseYear }.distinct().sortedDescending()
+        }
+    }
+    val filmTahunIni by produceState(emptyList<Movie>(), movies, tahunIni) {
+        value = withContext(Dispatchers.Default) {
+            movies.filter { !it.isSeries && it.releaseYear == tahunIni }
+                .sortedByDescending { it.rating ?: 0.0 }
+        }
+    }
+
     val sectionIds = remember(selectedFilter, sections) {
         selectedFilter.removePrefix("section:").takeIf { selectedFilter.startsWith("section:") }
             ?.let { selectedTitle -> sections.firstOrNull { it.title == selectedTitle }?.movieIds?.toSet() }
@@ -200,16 +215,18 @@ fun MoviesScreen(embedded: Boolean = false) {
     // mengetik. produceState membiarkan daftar lama tampil sampai hasil baru siap.
     val visibleMovies by produceState(
         initialValue = emptyList<Movie>(),
-        source, queryTersaring, sectionIds,
+        source, queryTersaring, sectionIds, tahunTerpilih,
     ) {
+        val tahun = tahunTerpilih
         value = withContext(Dispatchers.Default) {
             source.filter { movie ->
+                val matchesTahun = tahun == null || movie.releaseYear == tahun
                 val matchesQuery = queryTersaring.isBlank() ||
                     movie.title.contains(queryTersaring, true) ||
                     movie.overview.contains(queryTersaring, true) ||
                     movie.genres.any { it.contains(queryTersaring, true) }
                 val matchesSection = sectionIds == null || movie.id in sectionIds
-                matchesQuery && matchesSection
+                matchesQuery && matchesSection && matchesTahun
             }
         }
     }
@@ -235,7 +252,9 @@ fun MoviesScreen(embedded: Boolean = false) {
             .take(12)
     }
 
-    val bawaan = selectedFilter == "all" && query.isBlank() && movies.isNotEmpty()
+    val adaSaringan = query.isNotBlank() || tahunTerpilih != null
+    val bawaan = selectedFilter == "all" && !adaSaringan && movies.isNotEmpty()
+    val etalaseSerial = selectedFilter == "series" && !adaSaringan && deretSerial.isNotEmpty()
 
     // SATU LazyColumn untuk kedua tampilan. Dulu tampilan bawaan dan hasil
     // pencarian adalah dua pohon komposisi berbeda, jadi huruf pertama yang
@@ -261,30 +280,17 @@ fun MoviesScreen(embedded: Boolean = false) {
                     }
                 }
 
-                TextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    placeholder = { Text("Cari judul, sinopsis, atau genre…") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (refreshing || searchingRemote) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else if (embedded && repository.isCatalogConfigured) {
-                            IconButton(onClick = ::refreshCatalog) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "Perbarui katalog")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    ),
+                // Kolom cari yang sama persis dengan Podcast dan Radio. Versi
+                // sebelumnya menyalin TextField-nya sendiri lengkap dengan
+                // padding vertikal dan tombol segarkan di slot belakang, dan
+                // hasilnya terukur dua kali lebih tinggi daripada kolom cari
+                // Radio pada layar yang sama.
+                SearchField(
+                    query = query,
+                    onQuery = { query = it },
+                    placeholder = "Cari film atau serial…",
+                    sibuk = refreshing || searchingRemote,
+                    onFokus = { cariFokus = it },
                 )
 
                 LazyRow(
@@ -317,13 +323,26 @@ fun MoviesScreen(embedded: Boolean = false) {
                     }
                     // Genre yang sedang dibuka lewat "Lihat semua" tampil sebagai
                     // chip aktif, jadi pengguna tahu sedang menyaring apa.
-                    if (selectedFilter.startsWith("genre:")) {
+                    if (selectedFilter.startsWith("genre:") || selectedFilter.startsWith("serialgenre:")) {
+                        item {
+                            val serial = selectedFilter.startsWith("serialgenre:")
+                            FilterChip(
+                                selected = true,
+                                onClick = { selectedFilter = if (serial) "series" else "all" },
+                                label = {
+                                    Text(selectedFilter.substringAfter(":"))
+                                },
+                                trailingIcon = { Icon(Icons.Rounded.Close, "Hapus saringan genre", Modifier.size(16.dp)) },
+                            )
+                        }
+                    }
+                    if (tahunTerpilih != null) {
                         item {
                             FilterChip(
                                 selected = true,
-                                onClick = { selectedFilter = "all" },
-                                label = { Text(selectedFilter.removePrefix("genre:")) },
-                                trailingIcon = { Icon(Icons.Rounded.Close, "Hapus saringan genre", Modifier.size(16.dp)) },
+                                onClick = { tahunTerpilih = null },
+                                label = { Text(tahunTerpilih.toString()) },
+                                trailingIcon = { Icon(Icons.Rounded.Close, "Hapus saringan tahun", Modifier.size(16.dp)) },
                             )
                         }
                     }
@@ -350,17 +369,54 @@ fun MoviesScreen(embedded: Boolean = false) {
                     }
                 }
 
+                // Hanya kegagalan yang dilaporkan; lihat refreshCatalog.
                 syncMessage?.let { pesan ->
                     Text(
                         pesan,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (pesan.contains("gagal", true) || pesan.contains("belum", true)) {
-                            MaterialTheme.colorScheme.error
-                        } else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.error,
                     )
+                }
+
+                // Saran pencarian: genre dan tahun sebagai pilihan siap tekan,
+                // supaya pengguna tidak perlu menebak ejaan genre atau mengetik
+                // tahun di dalam kueri.
+                if (cariFokus || adaSaringan || selectedFilter.startsWith("genre:")) {
+                    Text(
+                        "Saran pencarian",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 20.dp, top = 6.dp, bottom = 2.dp),
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(deretGenre, key = { "saran:" + it.genre }) { deret ->
+                            val aktif = selectedFilter == "genre:${deret.genre}"
+                            FilterChip(
+                                selected = aktif,
+                                onClick = { selectedFilter = if (aktif) "all" else "genre:${deret.genre}" },
+                                label = { Text(deret.genre, maxLines = 1) },
+                            )
+                        }
+                    }
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(tahunTersedia, key = { "tahun:$it" }) { tahun ->
+                            val aktif = tahunTerpilih == tahun
+                            FilterChip(
+                                selected = aktif,
+                                onClick = { tahunTerpilih = if (aktif) null else tahun },
+                                label = { Text(tahun.toString()) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -405,7 +461,25 @@ fun MoviesScreen(embedded: Boolean = false) {
                 }
             }
 
-            items(sections, key = { "bagian:" + it.title }) { section ->
+            if (filmTahunIni.isNotEmpty()) {
+                item(key = "tahun-ini") {
+                    Deret(
+                        judul = "Film Terbaru $tahunIni",
+                        jumlah = filmTahunIni.size,
+                        film = filmTahunIni.take(ISI_DERET_GENRE),
+                        onLihatSemua = { tahunTerpilih = tahunIni },
+                        onBuka = { app.navigate(Routes.movieDetail(it.id)) },
+                    )
+                }
+            }
+
+            // Bagian katalog yang judulnya sama dengan deret tahun berjalan
+            // dilewati: deret itu sudah dibentuk aplikasi dari tahun perangkat,
+            // dan menampilkan keduanya berarti judul yang sama muncul dua kali.
+            items(
+                sections.filter { it.title != "Film Terbaru $tahunIni" },
+                key = { "bagian:" + it.title },
+            ) { section ->
                 val daftar = remember(section, peta) { section.movieIds.mapNotNull(peta.byId::get) }
                 if (daftar.isNotEmpty()) {
                     Deret(
@@ -424,6 +498,16 @@ fun MoviesScreen(embedded: Boolean = false) {
                     jumlah = deret.jumlah,
                     film = deret.film,
                     onLihatSemua = { selectedFilter = "genre:${deret.genre}" },
+                    onBuka = { app.navigate(Routes.movieDetail(it.id)) },
+                )
+            }
+        } else if (etalaseSerial) {
+            items(deretSerial, key = { "serial:" + it.genre }) { deret ->
+                Deret(
+                    judul = deret.genre,
+                    jumlah = deret.jumlah,
+                    film = deret.film,
+                    onLihatSemua = { selectedFilter = "serialgenre:${deret.genre}" },
                     onBuka = { app.navigate(Routes.movieDetail(it.id)) },
                 )
             }
@@ -480,6 +564,36 @@ fun MoviesScreen(embedded: Boolean = false) {
 
 /** Jumlah film minimum agar sebuah genre layak punya deretnya sendiri. */
 private const val BATAS_DERET_GENRE = 12
+
+/** Serial jauh lebih sedikit daripada film, jadi ambangnya lebih rendah. */
+private const val BATAS_DERET_SERIAL = 4
+
+/**
+ * Kelompokkan judul menurut genre, terbaru dan ternilai tinggi lebih dulu.
+ * Dipanggil dari Dispatchers.Default: untuk 25 ribu film ini pemindaian penuh.
+ */
+private fun kelompokkanGenre(daftar: List<Movie>, batas: Int = BATAS_DERET_GENRE): List<DeretGenre> {
+    val ember = HashMap<String, MutableList<Movie>>()
+    daftar.forEach { film ->
+        film.genres.forEach { mentah ->
+            val genre = mentah.trim()
+            if (genre.isNotEmpty()) ember.getOrPut(genre) { mutableListOf() }.add(film)
+        }
+    }
+    return ember.entries
+        .filter { it.value.size >= batas }
+        .sortedByDescending { it.value.size }
+        .map { (genre, isi) ->
+            DeretGenre(
+                genre = genre,
+                film = isi.sortedWith(
+                    compareByDescending<Movie> { it.releaseYear ?: 0 }
+                        .thenByDescending { it.rating ?: 0.0 },
+                ).take(ISI_DERET_GENRE),
+                jumlah = isi.size,
+            )
+        }
+}
 
 /** Banyak poster yang ditampilkan dalam satu deret mendatar. */
 private const val ISI_DERET_GENRE = 20

@@ -106,7 +106,9 @@ fun TogetherScreen() {
                 Text("Dengar Bareng", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Dengarkan lagu yang sama dengan teman secara realtime. Buat room sebagai host, atau gabung dengan kode dari temanmu.",
+                    "Dengar & nonton bareng secara realtime. Buat room sebagai host, atau gabung dengan kode dari temanmu. " +
+                            "Lagu disinkronkan sampai ke posisi putarnya; untuk film dan Live TV, tamu otomatis dibawa ke " +
+                            "tontonan yang sama dan host memberi aba-aba mulai lewat tombol di layar pemutar.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

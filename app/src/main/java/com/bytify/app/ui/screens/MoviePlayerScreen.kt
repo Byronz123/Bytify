@@ -43,6 +43,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Groups
+import com.bytify.app.data.together.Tontonan
+import com.bytify.app.data.together.TogetherState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -219,7 +222,7 @@ private fun subtitleKeJson(isi: String): String {
 }
 
 private fun ketukOtomatis(web: WebView, sudahMain: AtomicBoolean, percobaan: Int = 0) {
-    if (percobaan >= 4 || sudahMain.get()) return
+    if (percobaan >= 8 || sudahMain.get()) return
     web.postDelayed({
         if (!sudahMain.get() && web.width > 0 && web.height > 0) {
             val x = web.width / 2f
@@ -492,12 +495,23 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     val repository = app.container.movies
     val lifecycleOwner = LocalLifecycleOwner.current
     val fullscreen = isLandscape()
+    // Nonton Bareng: host mengumumkan judul & episode yang dibuka. Posisi putar
+    // tidak ikut dikirim — pemutarnya iframe pihak ketiga, garis waktunya tidak
+    // bisa dibaca maupun disetel aplikasi. Yang disinkronkan adalah pilihan
+    // tontonan dan aba-aba mulai.
+    val together = app.container.together
+    val statusRoom by together.state.collectAsState()
+    val hostRoom = statusRoom is TogetherState.InRoom && !together.isGuest
     val floating by ModeFloating.aktif.collectAsState()
-    DisposableEffect(Unit) {
-        ModeFloating.daftarkanVideo()
-        onDispose { ModeFloating.lepaskanVideo() }
-    }
+
     val playKey = episode?.id ?: movie.id
+    LaunchedEffect(movie.id, episode?.id, hostRoom) {
+        if (hostRoom) {
+            together.bagikanTontonan(
+                Tontonan("film", movie.id, episodeId = episode?.id, judul = movie.title),
+            )
+        }
+    }
     val videoUrl = episode?.videoUrl ?: movie.videoUrl.orEmpty()
     val subtitles = episode?.subtitles?.takeIf { it.isNotEmpty() } ?: if (episode == null) movie.subtitles else emptyList()
     var buffering by remember(playKey) { mutableStateOf(true) }
@@ -527,6 +541,34 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredTextLanguage("id")
                 .build()
+        }
+    }
+
+    // Jendela floating Android TIDAK menerima sentuhan: hanya tombol sistem
+    // yang bisa ditekan. Kalau pemutar embed masih menunggu ketukan — misalnya
+    // dialog "lanjutkan atau mulai dari awal" — jendela kecilnya akan membeku
+    // selamanya, karena dialog itu mustahil ditekan dari sana. Jadi mode
+    // floating baru diizinkan setelah videonya BENAR-BENAR berjalan: untuk
+    // embed saat halaman melaporkan BYTIFY_MAIN, untuk pemutar langsung saat
+    // ExoPlayer benar-benar memutar.
+    var videoBerjalan by remember(playKey) { mutableStateOf(false) }
+    DisposableEffect(videoBerjalan) {
+        if (videoBerjalan) ModeFloating.daftarkanVideo() else ModeFloating.lepaskanVideo()
+        onDispose { ModeFloating.lepaskanVideo() }
+    }
+    // Penandanya adalah NIAT memutar (playWhenReady), bukan isPlaying.
+    // isPlaying berkedip mati-nyala setiap kali aliran menyangga — terbukti di
+    // log: "terdaftar" lalu "dilepas" 16 ms kemudian — sehingga jendela
+    // floating nyaris tidak pernah sempat diizinkan. playWhenReady bertahan
+    // melintasi buffering dan hanya padam kalau pemutaran benar-benar dijeda.
+    LaunchedEffect(useEmbedPlayer, playKey) {
+        if (useEmbedPlayer) {
+            videoBerjalan = false
+            return@LaunchedEffect
+        }
+        while (true) {
+            videoBerjalan = exoPlayer.playWhenReady
+            delay(500)
         }
     }
 
@@ -639,6 +681,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     referer = movie.sourceUrl,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = {},
+                    onMulaiBerjalan = { videoBerjalan = true },
                 )
             }
         } else {
@@ -663,6 +706,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     referer = movie.sourceUrl,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, false) },
+                    onMulaiBerjalan = { videoBerjalan = true },
                 )
             }
         } else {
@@ -683,6 +727,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     style = MaterialTheme.typography.labelSmall, color = Color.LightGray, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (hostRoom) {
+                IconButton(onClick = { together.mulaiBareng() }) {
+                    Icon(Icons.Rounded.Groups, contentDescription = "Beri aba-aba nonton bareng", tint = BytifyColors.Gold)
+                }
+            }
             if (nextEpisode != null) {
                 IconButton(onClick = { if (!useEmbedPlayer) savePosition(); onSelectEpisode(nextEpisode) }) {
                     Icon(Icons.Rounded.SkipNext, contentDescription = "Episode berikutnya", tint = Color.White)
@@ -698,6 +747,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     referer = movie.sourceUrl,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, true) },
+                    onMulaiBerjalan = { videoBerjalan = true },
                 )
             }
         } else {
@@ -826,6 +876,7 @@ private fun EmbedVideoStage(
     onToggleFullscreen: () -> Unit,
     referer: String? = null,
     subtitleUrl: String? = null,
+    onMulaiBerjalan: () -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
@@ -884,6 +935,7 @@ private fun EmbedVideoStage(
                             val pesan = msg?.message().orEmpty()
                             if (pesan.contains("BYTIFY_MAIN")) {
                                 sudahMain.set(true)
+                                onMulaiBerjalan()
                                 Log.i(EMBED_TAG, "film berjalan; ketukan otomatis dihentikan")
                             } else {
                                 Log.i(EMBED_TAG, "konsol: $pesan")

@@ -22,6 +22,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Groups
+import com.bytify.app.data.together.Tontonan
+import com.bytify.app.data.together.TogetherState
+import com.bytify.app.ui.theme.BytifyColors
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -80,30 +85,13 @@ fun LivePlayerScreen(channelId: String) {
         return
     }
 
-    val now = System.currentTimeMillis()
-    val statusFresh = item.checkedAtEpochMs in 1..now && now - item.checkedAtEpochMs <= 10 * 60 * 1000L
-    if ((!item.isAvailable || !statusFresh) && !forcePlay) {
-        BackHandler { app.navController.popBackStack() }
-        Column(
-            Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(item.name, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Text(
-                if (!item.isAvailable) "Kanal sedang offline menurut pemeriksaan server (${item.statusMessage ?: "tidak merespons"})."
-                else "Status kanal sudah lama tidak diperiksa. Segarkan daftar kanal atau coba putar langsung.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { app.navController.popBackStack() }) { Text("Kembali") }
-                Button(onClick = { forcePlay = true }) { Text("Coba putar") }
-            }
-        }
-        return
-    }
-
+    // Gerbang status DIHAPUS. Ambangnya 10 menit sementara katalog kanal
+    // statis dan paling cepat disegarkan tiap tiga jam, jadi peringatan
+    // "status sudah lama tidak diperiksa" muncul hampir setiap kali kanal
+    // dibuka. Statusnya sendiri tidak pernah berarti: isAvailable selalu true
+    // dari server, jadi gerbang itu hanya menghalangi tanpa menjawab apa pun.
+    // Kalau alirannya memang mati, pemutar sudah menampilkan galat dan tombol
+    // coba lagi — itu sinyal yang jujur.
     LiveVideoPlayer(item)
 }
 
@@ -115,10 +103,16 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
     // Selama layar ini hidup, sistem boleh menjatuhkan aplikasi ke jendela
     // floating saat pengguna keluar.
     val floating by ModeFloating.aktif.collectAsState()
-    DisposableEffect(channel.id) {
-        ModeFloating.daftarkanVideo()
-        onDispose { ModeFloating.lepaskanVideo() }
+    // Nonton Bareng: host mengumumkan kanal yang dibuka, tamu ikut berpindah.
+    // Siaran langsung memang satu momen yang sama untuk semua penonton, jadi
+    // untuk Live TV inilah sinkronisasi yang sesungguhnya — tanpa koreksi apa pun.
+    val together = app.container.together
+    val statusRoom by together.state.collectAsState()
+    val hostRoom = statusRoom is TogetherState.InRoom && !together.isGuest
+    LaunchedEffect(channel.id, hostRoom) {
+        if (hostRoom) together.bagikanTontonan(Tontonan("live", channel.id, judul = channel.name))
     }
+
     var buffering by remember(channel.id) { mutableStateOf(true) }
     var playbackError by remember(channel.id) { mutableStateOf<String?>(null) }
     var isPlaying by remember(channel.id) { mutableStateOf(false) }
@@ -193,6 +187,33 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Jendela floating hanya diizinkan saat siaran benar-benar diputar; jendela
+    // yang isinya layar "menyangga" atau dijeda tidak bisa disentuh untuk
+    // diperbaiki, karena jendela floating Android tidak menerima sentuhan.
+    // Penandanya adalah NIAT memutar (playWhenReady), bukan isPlaying.
+    // isPlaying berkedip mati-nyala setiap kali aliran menyangga — terbukti di
+    // log: "terdaftar" lalu "dilepas" 16 ms kemudian — sehingga jendela
+    // floating nyaris tidak pernah sempat diizinkan. playWhenReady bertahan
+    // melintasi buffering dan hanya padam kalau pemutaran benar-benar dijeda.
+    var bolehFloating by remember(channel.id) { mutableStateOf(false) }
+    // Apakah sumbernya memang siaran langsung, menurut pemutarnya sendiri.
+    // Sebagian entri iptv-org ternyata berkas berdurasi, bukan aliran langsung;
+    // menuliskan "LIVE" untuk keduanya berarti berbohong kepada pengguna, jadi
+    // labelnya mengikuti kenyataan.
+    var benarLive by remember(channel.id) { mutableStateOf(true) }
+    LaunchedEffect(channel.id) {
+        while (true) {
+            bolehFloating = player.playWhenReady
+            benarLive = player.isCurrentMediaItemLive ||
+                player.duration == androidx.media3.common.C.TIME_UNSET
+            delay(500)
+        }
+    }
+    DisposableEffect(bolehFloating) {
+        if (bolehFloating) ModeFloating.daftarkanVideo() else ModeFloating.lepaskanVideo()
+        onDispose { ModeFloating.lepaskanVideo() }
+    }
+
     val retry = {
         playbackError = null
         buffering = true
@@ -212,12 +233,13 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
             error = playbackError,
             onRetry = retry,
             showSubtitleButton = false,
+            live = benarLive,
         )
         return
     }
 
     if (fullscreen) {
-        VideoStage(player, fullscreen = true, buffering = buffering, error = playbackError, onRetry = retry)
+        VideoStage(player, fullscreen = true, buffering = buffering, error = playbackError, onRetry = retry, live = benarLive)
         return
     }
 
@@ -230,18 +252,32 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
                 Text(channel.name, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 1)
                 Text("${channel.category} · ${channel.country}", style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
             }
+            if (hostRoom) {
+                IconButton(onClick = { together.mulaiBareng() }) {
+                    Icon(Icons.Rounded.Groups, contentDescription = "Beri aba-aba nonton bareng", tint = BytifyColors.Gold)
+                }
+            }
             IconButton(onClick = retry) {
                 Icon(Icons.Rounded.Refresh, contentDescription = "Muat ulang siaran", tint = Color.White)
             }
         }
 
-        VideoStage(player, fullscreen = false, buffering = buffering, error = playbackError, onRetry = retry, showSubtitleButton = false)
+        VideoStage(
+            player,
+            fullscreen = false,
+            buffering = buffering,
+            error = playbackError,
+            onRetry = retry,
+            showSubtitleButton = false,
+            live = benarLive,
+        )
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             val (dot, label) = when {
                 playbackError != null -> Color(0xFFE57373) to "Gangguan"
                 buffering -> Color(0xFFFFC857) to "Menyangga…"
-                isPlaying -> Color(0xFFE53935) to "LIVE"
+                isPlaying && benarLive -> Color(0xFFE53935) to "LIVE"
+                isPlaying -> Color(0xFFFFC857) to "Rekaman"
                 else -> Color.Gray to "Dijeda"
             }
             Spacer(Modifier.size(10.dp).clip(CircleShape).background(dot))

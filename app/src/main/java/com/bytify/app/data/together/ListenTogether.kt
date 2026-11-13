@@ -5,6 +5,7 @@ import com.bytify.app.playback.PlayerConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -25,6 +27,25 @@ import java.util.UUID
 import kotlin.math.abs
 
 data class RoomMember(val key: String, val name: String, val isHost: Boolean)
+
+/**
+ * Apa yang sedang ditonton bersama.
+ *
+ * [jenis] "film" untuk film & serial, "live" untuk kanal Live TV.
+ *
+ * Posisi putar SENGAJA tidak ikut. Seluruh katalog film diputar lewat iframe
+ * pihak ketiga (25.145 dari 25.186 film), sehingga aplikasi tidak punya kendali
+ * atas garis waktunya — tidak bisa dibaca, tidak bisa disetel. Yang bisa
+ * dijamin adalah semua orang membuka judul yang sama dan memulai pada aba-aba
+ * yang sama. Live TV tidak butuh posisi sama sekali: siarannya memang satu
+ * momen yang sama untuk semua penonton.
+ */
+data class Tontonan(
+    val jenis: String,
+    val id: String,
+    val episodeId: String? = null,
+    val judul: String = "",
+)
 
 sealed interface TogetherState {
     data object Idle : TogetherState
@@ -57,6 +78,21 @@ class ListenTogether(
 
     private val _state = MutableStateFlow<TogetherState>(TogetherState.Idle)
     val state: StateFlow<TogetherState> = _state.asStateFlow()
+
+    /** Tontonan yang sedang dibagikan host; tamu mengikutinya. */
+    private val _tontonan = MutableStateFlow<Tontonan?>(null)
+    val tontonan: StateFlow<Tontonan?> = _tontonan.asStateFlow()
+
+    /**
+     * Batas waktu hitung mundur, memakai jam MONOTONIK tiap perangkat.
+     *
+     * Yang dikirim lewat jaringan adalah LAMA hitung mundur, bukan waktu
+     * absolut: jam dinding dua ponsel bisa berbeda belasan detik, dan selisih
+     * itu akan merusak aba-aba. Selisih latensi jaringan sendiri hanya ratusan
+     * milidetik terhadap hitungan tiga detik.
+     */
+    private val _hitungMundur = MutableStateFlow<Long?>(null)
+    val hitungMundur: StateFlow<Long?> = _hitungMundur.asStateFlow()
 
     /** Saran lagu dari tamu (hanya untuk host). */
     private val _suggestions = MutableStateFlow<List<Pair<String, Song>>>(emptyList())
@@ -100,6 +136,8 @@ class ListenTogether(
 
     fun leave() {
         if (isHost && _state.value is TogetherState.InRoom) client.broadcast(EVENT_END, JsonObject(emptyMap()))
+        _tontonan.value = null
+        _hitungMundur.value = null
         stopHostSync()
         statusJob?.cancel()
         client.leave()
@@ -108,6 +146,32 @@ class ListenTogether(
 
     fun dismissEnded() {
         if (_state.value is TogetherState.Ended) _state.value = TogetherState.Idle
+    }
+
+    /**
+     * Host memberitahu room sedang menonton apa. Dipanggil layar pemutar saat
+     * terbuka, jadi tamu ikut berpindah tanpa host perlu menekan apa pun.
+     */
+    fun bagikanTontonan(baru: Tontonan) {
+        if (!isHost || _state.value !is TogetherState.InRoom) return
+        if (_tontonan.value == baru) return
+        _tontonan.value = baru
+        client.broadcast(EVENT_TONTON, baru.toJson())
+    }
+
+    /** Host memberi aba-aba agar semua menekan putar berbarengan. */
+    fun mulaiBareng(detik: Int = DETIK_ABA_ABA) {
+        if (!isHost || _state.value !is TogetherState.InRoom) return
+        client.broadcast(EVENT_ABA_ABA, buildJsonObject { put("detik", detik) })
+        pasangHitungMundur(detik)
+    }
+
+    fun selesaikanHitungMundur() {
+        _hitungMundur.value = null
+    }
+
+    private fun pasangHitungMundur(detik: Int) {
+        _hitungMundur.value = SystemClock.elapsedRealtime() + detik * 1000L
     }
 
     /** Tamu menyarankan lagu ke host. */
@@ -146,7 +210,15 @@ class ListenTogether(
         override fun onBroadcast(event: String, payload: JsonObject) {
             when (event) {
                 EVENT_SYNC -> if (!isHost) applySync(payload)
-                EVENT_REQUEST_SYNC -> if (isHost) requestSync()
+                EVENT_REQUEST_SYNC -> if (isHost) {
+                    requestSync()
+                    // Anggota yang baru masuk juga harus tahu sedang menonton apa.
+                    _tontonan.value?.let { client.broadcast(EVENT_TONTON, it.toJson()) }
+                }
+                EVENT_TONTON -> if (!isHost) _tontonan.value = payload.toTontonan()
+                EVENT_ABA_ABA -> if (!isHost) {
+                    pasangHitungMundur(payload["detik"]?.jsonPrimitive?.intOrNull ?: DETIK_ABA_ABA)
+                }
                 EVENT_SUGGEST -> if (isHost) {
                     val song = (payload["song"] as? JsonObject)?.toSong() ?: return
                     val from = payload["from"]?.jsonPrimitive?.content ?: "Tamu"
@@ -155,6 +227,8 @@ class ListenTogether(
                     }
                 }
                 EVENT_END -> if (!isHost) {
+                    _tontonan.value = null
+                    _hitungMundur.value = null
                     client.leave()
                     _state.value = TogetherState.Ended("Host mengakhiri sesi Dengar Bareng.")
                 }
@@ -264,7 +338,29 @@ class ListenTogether(
         )
     }
 
+    private fun Tontonan.toJson() = buildJsonObject {
+        put("jenis", jenis)
+        put("id", id)
+        put("judul", judul)
+        episodeId?.let { put("episodeId", it) }
+    }
+
+    private fun JsonObject.toTontonan(): Tontonan? {
+        val jenis = this["jenis"]?.jsonPrimitive?.content ?: return null
+        val id = this["id"]?.jsonPrimitive?.content ?: return null
+        if (id.isBlank()) return null
+        return Tontonan(
+            jenis = jenis,
+            id = id,
+            episodeId = this["episodeId"]?.jsonPrimitive?.content,
+            judul = this["judul"]?.jsonPrimitive?.content.orEmpty(),
+        )
+    }
+
     companion object {
+        private const val EVENT_TONTON = "tonton"
+        private const val EVENT_ABA_ABA = "aba_aba"
+        private const val DETIK_ABA_ABA = 3
         private const val EVENT_SYNC = "sync"
         private const val EVENT_REQUEST_SYNC = "request_sync"
         private const val EVENT_SUGGEST = "suggest"

@@ -42,10 +42,12 @@ object ModeFloating {
     fun daftarkanVideo(lebar: Int = 16, tinggi: Int = 9) {
         rasio = rasioAman(lebar, tinggi)
         _adaVideo.value = true
+        android.util.Log.i("ModeFloating", "video terdaftar")
     }
 
     fun lepaskanVideo() {
         _adaVideo.value = false
+        android.util.Log.i("ModeFloating", "video dilepas")
     }
 
     fun setAktif(nilai: Boolean) {

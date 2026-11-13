@@ -117,6 +117,12 @@ fun VideoStage(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     showSubtitleButton: Boolean = true,
+    /**
+     * Siaran langsung: garis waktu dan tombol lompat disembunyikan. Siaran
+     * tidak punya durasi untuk digeser, dan menampilkannya membuat kanal TV
+     * terasa seperti video rekaman biasa.
+     */
+    live: Boolean = false,
 ) {
     val context = LocalContext.current
     val box = if (fullscreen) modifier.fillMaxSize() else modifier.fillMaxWidth().aspectRatio(16f / 9f)
@@ -128,12 +134,18 @@ fun VideoStage(
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     setShowSubtitleButton(showSubtitleButton)
+                    setShowNextButton(false)
+                    setShowPreviousButton(false)
+                    setShowFastForwardButton(!live)
+                    setShowRewindButton(!live)
                     keepScreenOn = true
                     this.player = player
                 }
             },
             update = { view ->
                 view.player = player
+                view.setShowFastForwardButton(!live)
+                view.setShowRewindButton(!live)
                 view.setFullscreenButtonState(fullscreen)
                 view.setFullscreenButtonClickListener { toFullscreen -> toggleFullscreen(context, toFullscreen) }
             },

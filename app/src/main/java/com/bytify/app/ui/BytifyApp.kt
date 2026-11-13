@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.layout
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.bytify.app.ui.components.AbaAbaNonton
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -141,6 +142,24 @@ fun BytifyApp(container: AppContainer) {
     val isVideoPlayer = route == Routes.LIVE_PLAYER || route == Routes.MOVIE_PLAYER
     val isRecap = route == Routes.RECAP
     val snackbar = remember { SnackbarHostState() }
+
+    // Nonton Bareng: tamu mengikuti apa pun yang dibuka host. Perpindahannya
+    // dikerjakan di sini, bukan di layar pemutar, supaya tamu ikut berpindah
+    // walaupun sedang berada di layar lain.
+    val together = container.together
+    val tontonan by together.tontonan.collectAsState()
+    LaunchedEffect(tontonan, together.isGuest) {
+        val target = tontonan ?: return@LaunchedEffect
+        if (!together.isGuest) return@LaunchedEffect
+        val rute = when (target.jenis) {
+            "live" -> Routes.livePlayer(target.id)
+            else -> Routes.moviePlayer(target.id, target.episodeId)
+        }
+        if (navController.currentDestination?.route != rute) {
+            navController.navigate(rute) { launchSingleTop = true }
+        }
+    }
+    val batasAbaAba by together.hitungMundur.collectAsState()
 
     LaunchedEffect(app.message) {
         app.message?.let {
@@ -265,6 +284,14 @@ fun BytifyApp(container: AppContainer) {
                     CollectionScreen(android.net.Uri.decode(it.arguments?.getString("kind").orEmpty()))
                 }
             }
+            }
+
+            batasAbaAba?.let { batas ->
+                AbaAbaNonton(
+                    batasElapsedRealtime = batas,
+                    catatan = "Tekan putar bersama-sama saat hitungan habis.",
+                    onSelesai = { together.selesaikanHitungMundur() },
+                )
             }
 
             if (!isRecap) {

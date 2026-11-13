@@ -105,6 +105,12 @@ FIELD_KATALOG = {
     "releaseYear", "durationMin", "genres", "rating", "language",
     "videoUrl", "sourceUrl", "servers", "trailerUrl", "subtitles",
     "episodes",
+    # Negara asal. Sebelumnya dibuang di sini, jadi katalog yang terbit TIDAK
+    # punya informasi negara sama sekali: "language" berisi "id" untuk seluruh
+    # 25.186 film karena itu bahasa subtitle, bukan asal film. Akibatnya film
+    # Indonesia tidak bisa dikenali, apalagi ditampilkan sebagai satu bagian.
+    # Biayanya kecil: satu daftar pendek per film.
+    "countries",
 }
 
 # Sinopsis adalah penyumbang terbesar (8,66 MB, rata-rata 359 karakter).

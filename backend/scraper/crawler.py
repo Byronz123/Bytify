@@ -115,7 +115,12 @@ def temukan_kategori(sesi, base_url, base_domain):
     Dengan begini kategori baru di situs otomatis ikut terjelajahi, tanpa perlu
     daftar tetap yang cepat basi.
     """
-    jalur = {"", "/populer", "/rating"}
+    # Kategori yang ADA di situs tetapi TIDAK tertaut dari halaman depan.
+    # /country/indonesia adalah contohnya: menu negara halaman depan memuat 19
+    # negara dan Indonesia bukan salah satunya, sehingga penemuan-sendiri
+    # melewatinya diam-diam — 181 film Indonesia tidak pernah tersapu lewat
+    # jalur negaranya. Penemuan-sendiri tetap dipakai; ini hanya benih tambahan.
+    jalur = {"", "/populer", "/rating", "/country/indonesia"}
     html = _ambil(sesi, base_url)
     if html:
         soup = BeautifulSoup(html, "html.parser")

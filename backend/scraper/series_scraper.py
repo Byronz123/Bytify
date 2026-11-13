@@ -392,8 +392,64 @@ def panen_semua(urls, pekerja=20, berkas=BERKAS_HASIL):
     return hasil
 
 
+def segarkan(berkas=BERKAS_HASIL, pekerja=12):
+    """
+    Pemanenan ulang yang murah untuk daemon.
+
+    Dua hal saja yang dikerjakan: serial yang BELUM pernah dipanen, dan serial
+    berstatus "Ongoing" yang episodenya masih bertambah. Serial "Complete"
+    tidak pernah berubah lagi, jadi memanennya ulang tiap tiga jam hanya
+    membuang puluhan ribu permintaan tanpa satu pun baris baru.
+    """
+    urls = jelajahi_daftar_serial()
+
+    lama_isi = []
+    if os.path.exists(berkas):
+        try:
+            with open(berkas, encoding="utf-8") as f:
+                lama_isi = json.load(f)
+        except Exception:
+            lama_isi = []
+    menurut_url = {s.get("sourceUrl"): s for s in lama_isi if s.get("sourceUrl")}
+
+    baru_url = [u for u in urls if u not in menurut_url]
+    ongoing = [u for u in urls if menurut_url.get(u, {}).get("status") == "Ongoing"]
+    perlu = list(dict.fromkeys(baru_url + ongoing))
+    print(f"[serial] {len(baru_url)} serial baru, {len(ongoing)} ongoing "
+          f"-> {len(perlu)} akan dipanen ulang")
+    if not perlu:
+        return lama_isi
+
+    sesi_hasil = []
+    kunci = threading.Lock()
+    with ThreadPoolExecutor(max_workers=pekerja) as kolam:
+        tugas = {kolam.submit(panen_satu_serial, u): u for u in perlu}
+        for t in as_completed(tugas):
+            try:
+                satu = t.result()
+            except Exception:
+                satu = None
+            if satu:
+                with kunci:
+                    sesi_hasil.append(satu)
+
+    for satu in sesi_hasil:
+        menurut_url[satu["sourceUrl"]] = satu
+    gabung = list(menurut_url.values())
+    sementara = berkas + ".tmp"
+    with open(sementara, "w", encoding="utf-8") as f:
+        json.dump(gabung, f, ensure_ascii=False)
+    os.replace(sementara, berkas)
+    jumlah_ep = sum(len(x.get("episodes") or []) for x in gabung)
+    print(f"[serial] segar: {len(gabung)} serial, {jumlah_ep} episode")
+    return gabung
+
+
 if __name__ == "__main__":
     perintah = sys.argv[1] if len(sys.argv) > 1 else "semua"
+    if perintah == "segarkan":
+        segarkan()
+        raise SystemExit(0)
     if perintah in ("daftar", "semua"):
         tautan = jelajahi_daftar_serial()
     else:

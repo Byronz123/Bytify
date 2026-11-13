@@ -9,6 +9,8 @@ from pathlib import Path
 from crawler import crawl_massive_catalog_parallel
 from build_database import build_database
 from tv_garden_scraper import build_live_tv_database
+from series_scraper import segarkan as segarkan_serial
+from build_series_catalog import main as bangun_katalog_serial
 
 # Domain utama disetel otomatis berdasarkan movie_links.txt Anda
 DEFAULT_MOVIE_DOMAIN = os.environ.get("LK21_SCRAPE_DOMAIN", "https://tv12.lk21official.cc/")
@@ -22,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # pernah ikut terdorong tanpa sengaja.
 BERKAS_TERBIT = [
     "backend/data/catalog.json",
+    "backend/data/series_catalog.json",
     "backend/data/live_tv_database.json",
 ]
 
@@ -77,7 +80,7 @@ def run_full_sync_cycle():
 
     # 1. Auto-Crawl Film Baru
     try:
-        print("\n[TAHAP 1/4] Memindai Katalog Film Terbaru...")
+        print("\n[TAHAP 1/5] Memindai Katalog Film Terbaru...")
         crawl_massive_catalog_parallel(DEFAULT_MOVIE_DOMAIN)
     except Exception as e:
         print(f"[!] Error pada Tahap 1 (Crawler): {e}")
@@ -85,7 +88,7 @@ def run_full_sync_cycle():
 
     # 2. Auto-Build Database Film Baru (Hanya memproses URL yang belum ada di JSON)
     try:
-        print("\n[TAHAP 2/4] Mengekstrak Metadata, Poster, ND_URL & Stream Film Baru...")
+        print("\n[TAHAP 2/5] Mengekstrak Metadata, Poster, ND_URL & Stream Film Baru...")
         build_database()
     except Exception as e:
         print(f"[!] Error pada Tahap 2 (Build Database): {e}")
@@ -93,19 +96,30 @@ def run_full_sync_cycle():
 
     # 3. Auto-Scrape Saluran Live TV dari TV Garden
     try:
-        print("\n[TAHAP 3/4] Memperbarui Saluran Live TV dari TV Garden...")
+        print("\n[TAHAP 3/5] Memperbarui Saluran Live TV dari TV Garden...")
         build_live_tv_database()
     except Exception as e:
         print(f"[!] Error pada Tahap 3 (TV Garden Scraper): {e}")
         traceback.print_exc()
 
-    # 4. Terbitkan: tanpa tahap ini katalog hanya berubah di komputer dan
+    # 4. Serial: hanya judul baru dan yang masih "Ongoing" yang dipanen ulang.
+    #    Serial "Complete" tidak pernah bertambah episodenya, jadi memanennya
+    #    tiap tiga jam hanya membuang puluhan ribu permintaan.
+    try:
+        print("\n[TAHAP 4/5] Menyegarkan serial baru & yang masih tayang...")
+        segarkan_serial()
+        bangun_katalog_serial()
+    except Exception as e:
+        print(f"[!] Error pada Tahap 4 (Serial): {e}")
+        traceback.print_exc()
+
+    # 5. Terbitkan: tanpa tahap ini katalog hanya berubah di komputer dan
     #    tidak pernah sampai ke pengguna.
     try:
-        print("\n[TAHAP 4/4] Menerbitkan katalog ke GitHub...")
+        print("\n[TAHAP 5/5] Menerbitkan katalog ke GitHub...")
         terbitkan_katalog()
     except Exception as e:
-        print(f"[!] Error pada Tahap 4 (Terbit): {e}")
+        print(f"[!] Error pada Tahap 5 (Terbit): {e}")
         traceback.print_exc()
 
     print("\n" + "=" * 65)

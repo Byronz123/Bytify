@@ -72,6 +72,42 @@ class MovieCatalogApi(
         }
     }
 
+    /**
+     * Mengambil katalog serial, yang terbit sebagai berkas terpisah di samping
+     * catalog.json.
+     *
+     * Dipisah karena batas keras 25 MiB per berkas di Cloudflare Pages: katalog
+     * film sendiri sudah 23,26 MiB, sedangkan serial membawa puluhan ribu
+     * episode. URL-nya diturunkan dari URL katalog film supaya tidak ada
+     * setelan baru yang harus diisi di local.properties.
+     *
+     * Mengembalikan null — bukan melempar — bila berkasnya belum ada, agar APK
+     * lama tetap jalan melawan deploy yang belum memuat serial.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    suspend fun fetchSeriesCatalog(): MovieCatalogDto? = withContext(Dispatchers.IO) {
+        if (!isConfigured) return@withContext null
+        val parsedUrl = "$baseApiUrl/api/series.json".toHttpUrlOrNull() ?: return@withContext null
+        if (parsedUrl.scheme != "https" && !isAllowedHost(parsedUrl.host)) return@withContext null
+
+        val request = Request.Builder()
+            .url(parsedUrl)
+            .get()
+            .header("Accept", "application/json")
+            .header("User-Agent", "Bytify/${com.bytify.app.BuildConfig.VERSION_NAME} (Android)")
+            .build()
+
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val stream = response.body?.byteStream() ?: return@withContext null
+                json.decodeFromStream<MovieCatalogDto>(stream)
+            }
+        } catch (error: Exception) {
+            null
+        }
+    }
+
     /** Mengambil detail lengkap (sinopsis, trailer, dan seluruh episode series) dari backend LK21. */
     suspend fun fetchLk21Details(movieId: String): MovieDto? = withContext(Dispatchers.IO) {
         if (!isConfigured || !movieId.startsWith("lk21-")) return@withContext null

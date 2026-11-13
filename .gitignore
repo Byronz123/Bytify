@@ -13,6 +13,9 @@ __pycache__/
 
 # Hasil scraping mentah (~28 MB); dihasilkan scraper, cadangan di luar repo
 backend/data/bytify_database.json
+# Hasil panen serial mentah (berisi server alternatif per episode); yang
+# diterbitkan adalah series_catalog.json yang sudah diramping.
+backend/data/series_database.json
 
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/

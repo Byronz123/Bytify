@@ -39,6 +39,25 @@ const catalogOut = path.join(outputDir, 'api', 'catalog.json');
 fs.mkdirSync(path.dirname(catalogOut), { recursive: true });
 fs.copyFileSync(catalogSource, catalogOut);
 
+// Katalog serial terbit sebagai berkas sendiri. Cloudflare Pages menolak
+// berkas di atas 25 MiB dan catalog.json sudah 23,26 MiB, jadi puluhan ribu
+// episode tidak mungkin ikut di dalamnya. Berkasnya opsional: selama panen
+// belum pernah dijalankan, deploy tetap berhasil tanpa serial.
+const seriesSource = path.join(backendDir, 'data', 'series_catalog.json');
+let seriesCount = 0;
+let seriesEpisodeCount = 0;
+if (fs.existsSync(seriesSource)) {
+    const series = readJson(seriesSource); // validasi JSON sebelum menyalin
+    seriesCount = Array.isArray(series.movies) ? series.movies.length : 0;
+    seriesEpisodeCount = (series.movies || []).reduce(
+        (jumlah, satu) => jumlah + (Array.isArray(satu.episodes) ? satu.episodes.length : 0),
+        0,
+    );
+    const seriesOut = path.join(outputDir, 'api', 'series.json');
+    fs.mkdirSync(path.dirname(seriesOut), { recursive: true });
+    fs.copyFileSync(seriesSource, seriesOut);
+}
+
 // Live TV tetap dibangun dari database kanal (tidak berubah).
 const channels = readArray(path.join(backendDir, 'data', 'live_tv_database.json'))
     .map((channel) => toLiveChannel(channel, generatedAtEpochMs))
@@ -54,6 +73,7 @@ writeJson(path.join(outputDir, 'health'), { ok: true });
 const movieCount = Array.isArray(catalog.movies) ? catalog.movies.length : 0;
 const sectionCount = Array.isArray(catalog.sections) ? catalog.sections.length : 0;
 console.log(
-    `Copied ${movieCount} movies (${sectionCount} sections) verbatim and generated ` +
+    `Copied ${movieCount} movies (${sectionCount} sections) and ${seriesCount} series ` +
+        `(${seriesEpisodeCount} episodes) verbatim and generated ` +
         `${channels.length} live channels in ${outputDir}.`,
 );

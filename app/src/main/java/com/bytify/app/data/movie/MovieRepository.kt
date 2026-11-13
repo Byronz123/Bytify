@@ -101,7 +101,22 @@ class MovieRepository(
             }
             .toList()
         dao.replaceMovieSections(validSections)
-        return validMovies.size
+
+        // Serial datang dari berkas terpisah dan masuk ke tabel yang sama.
+        // Sections TIDAK disentuh: itu milik katalog film, dan menuliskannya
+        // ulang di sini akan menghapus deret yang baru saja dibuat.
+        val serial = runCatching { api.fetchSeriesCatalog() }.getOrNull()
+        val jumlahSerial = serial?.movies
+            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            ?.map { it.toMovie() }
+            ?.also { daftar ->
+                if (daftar.isNotEmpty()) {
+                    dao.upsertMovies(daftar.map { it.toEntity(json, now) })
+                }
+            }
+            ?.size ?: 0
+
+        return validMovies.size + jumlahSerial
     }
 
     /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */

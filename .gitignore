@@ -36,3 +36,8 @@ backend/scraper/auto-sync.log
 backend/data/.build_database.lock
 backend/scraper/scrape-metadata.log
 
+
+# Hasil panen katalog film Indonesia (mentah); yang diterbitkan nanti versi
+# rampingnya, sama seperti serial.
+backend/data/film_indonesia_database.json
+backend/data/film_indonesia_database.json.*.tmp

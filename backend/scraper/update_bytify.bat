@@ -15,7 +15,8 @@ echo ======================================================== > "%LOG%"
 echo [%DATE% %TIME%] Memulai Sistem Auto-Sync Bytify... >> "%LOG%"
 echo ======================================================== >> "%LOG%"
 
-:: Crawl film baru -> build catalog.json -> scrape TV Garden -> terbitkan ke GitHub.
+:: Crawl film baru -> build catalog.json -> scrape Live TV -> segarkan serial
+:: baru & yang masih tayang -> terbitkan ke GitHub.
 :: Tahap terbit itulah yang memicu deploy ke Cloudflare Pages.
 python auto_sync_daemon.py >> "%LOG%" 2>&1
 

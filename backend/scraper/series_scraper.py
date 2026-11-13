@@ -228,12 +228,18 @@ def _server_dari_halaman(html):
     return utama, server
 
 
-def panen_satu_serial(url, sesi=None, batas_episode=200):
+def panen_satu_serial(url, sesi=None, batas_episode=200, episode_lama=None):
     """
-    Ambil metadata satu serial beserta seluruh episodenya.
+    Ambil metadata satu serial beserta episodenya.
 
-    Episode ditelusuri 1..N sampai server menjawab 404; itu batas yang jujur,
-    bukan tebakan dari kartu daftar yang bisa basi untuk serial ongoing.
+    Episode ditelusuri sampai server menjawab 404; itu batas yang jujur, bukan
+    tebakan dari kartu daftar yang bisa basi untuk serial ongoing.
+
+    [episode_lama] dipakai daemon: episode yang sudah dipanen dipertahankan apa
+    adanya dan penelusuran dimulai dari nomor berikutnya. Untuk 1.023 serial
+    yang masih tayang, memanen ulang seluruh 9.680 episodenya tiap tiga jam
+    berarti ~9.700 permintaan hanya untuk menemukan segelintir episode baru;
+    dengan cara ini tinggal sekitar satu probe per serial.
     """
     sesi = sesi or requests.Session()
     html = _ambil(sesi, url)
@@ -304,6 +310,13 @@ def panen_satu_serial(url, sesi=None, batas_episode=200):
 
     episodes = []
     nomor = 1
+    if episode_lama:
+        # Hanya episode milik musim yang sama yang bisa dilanjutkan; kalau
+        # musimnya berganti, telusuri dari awal supaya tidak ada yang terlewat.
+        sebelumnya = [e for e in episode_lama if int(e.get("season") or 1) == musim]
+        if sebelumnya:
+            episodes = list(sebelumnya)
+            nomor = max(int(e.get("episode") or 0) for e in sebelumnya) + 1
     while nomor <= batas_episode:
         ep_url = urljoin(url, f"{awalan}episode-{nomor}-{akhiran}")
         ep_html = _ambil(sesi, ep_url, percobaan=3)
@@ -329,6 +342,7 @@ def panen_satu_serial(url, sesi=None, batas_episode=200):
 
     if not episodes:
         return None
+    episodes.sort(key=lambda e: (int(e.get("season") or 1), int(e.get("episode") or 0)))
 
     return {
         "id": siput,
@@ -423,7 +437,13 @@ def segarkan(berkas=BERKAS_HASIL, pekerja=12):
     sesi_hasil = []
     kunci = threading.Lock()
     with ThreadPoolExecutor(max_workers=pekerja) as kolam:
-        tugas = {kolam.submit(panen_satu_serial, u): u for u in perlu}
+        tugas = {
+            kolam.submit(
+                panen_satu_serial, u, None, 200,
+                (menurut_url.get(u) or {}).get("episodes"),
+            ): u
+            for u in perlu
+        }
         for t in as_completed(tugas):
             try:
                 satu = t.result()

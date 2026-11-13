@@ -80,7 +80,6 @@ fun MoviesScreen(embedded: Boolean = false) {
     val movies by repository.movies.collectAsState(initial = emptyList())
     val favorites by repository.favoriteMovies.collectAsState(initial = emptyList())
     val favoriteIds by repository.favoriteIds.collectAsState(initial = emptySet())
-    val sections by repository.sections.collectAsState(initial = emptyList())
     val history by repository.history.collectAsState(initial = emptyList())
 
     var query by rememberSaveable { mutableStateOf("") }
@@ -160,6 +159,9 @@ fun MoviesScreen(embedded: Boolean = false) {
                 val genre = selectedFilter.removePrefix("genre:")
                 movies.filter { film -> !film.isSeries && film.genres.any { it.equals(genre, true) } }
             }
+            selectedFilter == "rating" ->
+                movies.filter { !it.isSeries && (it.rating ?: 0.0) > 0.0 }
+                    .sortedByDescending { it.rating ?: 0.0 }
             selectedFilter.startsWith("serialgenre:") -> {
                 val genre = selectedFilter.removePrefix("serialgenre:")
                 movies.filter { film -> film.isSeries && film.genres.any { it.equals(genre, true) } }
@@ -191,6 +193,15 @@ fun MoviesScreen(embedded: Boolean = false) {
     // bukan dari judul bagian yang ikut di katalog. Begitu tahun berganti,
     // deretnya ikut berganti sendiri dan film bertahun baru langsung masuk —
     // tanpa menunggu scraper, deploy, atau APK baru.
+    // "Rating Tertinggi" dihitung dari SELURUH katalog, bukan dari bagian
+    // bawaan katalog yang isinya sudah dipotong 20 id.
+    val ratingTertinggi by produceState(emptyList<Movie>(), movies) {
+        value = withContext(Dispatchers.Default) {
+            movies.filter { !it.isSeries && (it.rating ?: 0.0) > 0.0 }
+                .sortedByDescending { it.rating ?: 0.0 }
+        }
+    }
+
     val tahunIni = remember { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) }
     // Tahun diambil dari katalognya sendiri, bukan rentang tetap: begitu film
     // bertahun baru masuk, tahunnya ikut muncul sebagai pilihan.
@@ -206,16 +217,12 @@ fun MoviesScreen(embedded: Boolean = false) {
         }
     }
 
-    val sectionIds = remember(selectedFilter, sections) {
-        selectedFilter.removePrefix("section:").takeIf { selectedFilter.startsWith("section:") }
-            ?.let { selectedTitle -> sections.firstOrNull { it.title == selectedTitle }?.movieIds?.toSet() }
-    }
     // Penyaringan 25.135 film dijalankan DI LUAR main thread. Terukur di Galaxy
     // A36: sekali jalan memakan ~600 ms, yang muncul sebagai satu pembekuan saat
     // mengetik. produceState membiarkan daftar lama tampil sampai hasil baru siap.
     val visibleMovies by produceState(
         initialValue = emptyList<Movie>(),
-        source, queryTersaring, sectionIds, tahunTerpilih,
+        source, queryTersaring, tahunTerpilih,
     ) {
         val tahun = tahunTerpilih
         value = withContext(Dispatchers.Default) {
@@ -225,8 +232,7 @@ fun MoviesScreen(embedded: Boolean = false) {
                     movie.title.contains(queryTersaring, true) ||
                     movie.overview.contains(queryTersaring, true) ||
                     movie.genres.any { it.contains(queryTersaring, true) }
-                val matchesSection = sectionIds == null || movie.id in sectionIds
-                matchesQuery && matchesSection && matchesTahun
+                matchesQuery && matchesTahun
             }
         }
     }
@@ -346,12 +352,15 @@ fun MoviesScreen(embedded: Boolean = false) {
                             )
                         }
                     }
-                    items(sections, key = { it.title }) { section ->
-                        FilterChip(
-                            selected = selectedFilter == "section:${section.title}",
-                            onClick = { selectedFilter = "section:${section.title}" },
-                            label = { Text(section.title, maxLines = 1) },
-                        )
+                    if (selectedFilter == "rating") {
+                        item {
+                            FilterChip(
+                                selected = true,
+                                onClick = { selectedFilter = "all" },
+                                label = { Text("Rating Tertinggi") },
+                                trailingIcon = { Icon(Icons.Rounded.Close, "Hapus saringan", Modifier.size(16.dp)) },
+                            )
+                        }
                     }
                 }
 
@@ -473,20 +482,20 @@ fun MoviesScreen(embedded: Boolean = false) {
                 }
             }
 
-            // Bagian katalog yang judulnya sama dengan deret tahun berjalan
-            // dilewati: deret itu sudah dibentuk aplikasi dari tahun perangkat,
-            // dan menampilkan keduanya berarti judul yang sama muncul dua kali.
-            items(
-                sections.filter { it.title != "Film Terbaru $tahunIni" },
-                key = { "bagian:" + it.title },
-            ) { section ->
-                val daftar = remember(section, peta) { section.movieIds.mapNotNull(peta.byId::get) }
-                if (daftar.isNotEmpty()) {
+            // Bagian bawaan katalog (Film Terbaru / Rating Tertinggi / Drama /
+            // Comedy / ...) SENGAJA tidak dipakai lagi sebagai deret. Isinya
+            // sudah dipotong di hulu — 20 id untuk dua bagian teratas, 15 id
+            // untuk tiap genre — sehingga tombol "Lihat semua" di bawahnya
+            // menampilkan "(15)" dan "(20)" padahal genre Drama punya 11.299
+            // film. Semua deret kini dihitung aplikasi dari katalog penuh,
+            // jadi angka di tombolnya selalu jumlah yang sebenarnya.
+            if (ratingTertinggi.isNotEmpty()) {
+                item(key = "rating-tertinggi") {
                     Deret(
-                        judul = section.title,
-                        jumlah = daftar.size,
-                        film = daftar.take(ISI_DERET_GENRE),
-                        onLihatSemua = { selectedFilter = "section:${section.title}" },
+                        judul = "Rating Tertinggi",
+                        jumlah = ratingTertinggi.size,
+                        film = ratingTertinggi.take(ISI_DERET_GENRE),
+                        onLihatSemua = { selectedFilter = "rating" },
                         onBuka = { app.navigate(Routes.movieDetail(it.id)) },
                     )
                 }

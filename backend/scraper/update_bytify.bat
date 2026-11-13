@@ -7,6 +7,11 @@ cd /d E:\Portofolio\Karya\Bytify\backend\scraper
 :: GAGAL di-scrape.
 set PYTHONIOENCODING=utf-8
 
+:: Keluaran daemon diarahkan ke berkas, dan Python mem-buffer per blok kalau
+:: stdout bukan konsol. Tanpa ini log baru terisi berjam-jam kemudian, padahal
+:: justru log itulah satu-satunya cara memeriksa jalannya daemon tanpa diawasi.
+set PYTHONUNBUFFERED=1
+
 :: Semua keluaran dicatat ke berkas supaya bisa diperiksa setelah berjalan
 :: tanpa pengawasan. Berkas log ditimpa tiap kali daemon dimulai.
 set LOG=E:\Portofolio\Karya\Bytify\backend\scraper\auto-sync.log

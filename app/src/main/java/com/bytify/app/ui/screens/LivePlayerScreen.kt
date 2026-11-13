@@ -51,6 +51,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.bytify.app.data.live.LiveChannel
+import com.bytify.app.ui.ModeFloating
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.components.VideoStage
 import com.bytify.app.ui.components.VideoWindowEffect
@@ -111,6 +112,13 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
     val app = appState()
     val context = LocalContext.current
     val fullscreen = isLandscape()
+    // Selama layar ini hidup, sistem boleh menjatuhkan aplikasi ke jendela
+    // floating saat pengguna keluar.
+    val floating by ModeFloating.aktif.collectAsState()
+    DisposableEffect(channel.id) {
+        ModeFloating.daftarkanVideo()
+        onDispose { ModeFloating.lepaskanVideo() }
+    }
     var buffering by remember(channel.id) { mutableStateOf(true) }
     var playbackError by remember(channel.id) { mutableStateOf<String?>(null) }
     var isPlaying by remember(channel.id) { mutableStateOf(false) }
@@ -191,6 +199,21 @@ private fun LiveVideoPlayer(channel: LiveChannel) {
         player.seekToDefaultPosition()
         player.prepare()
         player.play()
+    }
+
+    // Di jendela floating hanya gambarnya yang tersisa: judul, tombol, dan
+    // keterangan tidak akan terbaca pada jendela sekecil itu dan hanya memakan
+    // ruang gambar.
+    if (floating) {
+        VideoStage(
+            player,
+            fullscreen = true,
+            buffering = buffering,
+            error = playbackError,
+            onRetry = retry,
+            showSubtitleButton = false,
+        )
+        return
     }
 
     if (fullscreen) {

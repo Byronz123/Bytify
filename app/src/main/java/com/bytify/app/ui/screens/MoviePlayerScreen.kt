@@ -77,6 +77,7 @@ import com.bytify.app.data.movie.EpisodeDto
 import com.bytify.app.data.movie.Movie
 import com.bytify.app.data.movie.MovieSubtitleDto
 import com.bytify.app.data.movie.isJunkMediaUrl
+import com.bytify.app.ui.ModeFloating
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.components.VideoStage
 import com.bytify.app.ui.components.VideoWindowEffect
@@ -491,6 +492,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     val repository = app.container.movies
     val lifecycleOwner = LocalLifecycleOwner.current
     val fullscreen = isLandscape()
+    val floating by ModeFloating.aktif.collectAsState()
+    DisposableEffect(Unit) {
+        ModeFloating.daftarkanVideo()
+        onDispose { ModeFloating.lepaskanVideo() }
+    }
     val playKey = episode?.id ?: movie.id
     val videoUrl = episode?.videoUrl ?: movie.videoUrl.orEmpty()
     val subtitles = episode?.subtitles?.takeIf { it.isNotEmpty() } ?: if (episode == null) movie.subtitles else emptyList()
@@ -620,6 +626,32 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         buffering = true
         exoPlayer.prepare()
         exoPlayer.play()
+    }
+
+    // Di jendela floating hanya gambarnya yang tersisa; daftar episode dan
+    // kontrol tidak terbaca pada jendela sekecil itu.
+    if (floating) {
+        if (useEmbedPlayer) {
+            key(activeEmbedUrl) {
+                EmbedVideoStage(
+                    videoUrl = activeEmbedUrl,
+                    fullscreen = true,
+                    referer = movie.sourceUrl,
+                    subtitleUrl = activeSubUrl,
+                    onToggleFullscreen = {},
+                )
+            }
+        } else {
+            VideoStage(
+                exoPlayer,
+                fullscreen = true,
+                buffering = buffering,
+                error = playbackError,
+                onRetry = retry,
+                showSubtitleButton = false,
+            )
+        }
+        return
     }
 
     if (fullscreen) {

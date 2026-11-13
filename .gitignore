@@ -41,3 +41,7 @@ backend/scraper/scrape-metadata.log
 # rampingnya, sama seperti serial.
 backend/data/film_indonesia_database.json
 backend/data/film_indonesia_database.json.*.tmp
+
+# Kunci API TMDB dan rahasia scraper lain.
+backend/scraper/.env
+backend/scraper/.env.*

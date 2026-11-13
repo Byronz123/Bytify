@@ -46,6 +46,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.rounded.Groups
 import com.bytify.app.data.together.Tontonan
 import com.bytify.app.data.together.TogetherState
+import com.bytify.app.util.PESAN_SEDANG_MENELPON
+import com.bytify.app.util.sedangMenelpon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -598,6 +600,21 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 exoPlayer.playWhenReady = !exoPlayer.playWhenReady
             }
             delay(500)
+        }
+    }
+
+    // Selama panggilan, aplikasi telepon memegang fokus audio secara eksklusif
+    // dan pemutar mana pun yang berkelakuan baik akan bungkam. Larangannya
+    // tidak boleh dilanggar — tetapi membiarkannya tanpa keterangan membuat
+    // pemutar terlihat rusak, dan itu yang diperbaiki di sini.
+    val konteksPanggilan = LocalContext.current
+    LaunchedEffect(Unit) {
+        var sebelumnya = false
+        while (true) {
+            val kini = sedangMenelpon(konteksPanggilan)
+            if (kini && !sebelumnya) app.toast(PESAN_SEDANG_MENELPON)
+            sebelumnya = kini
+            delay(1500)
         }
     }
 

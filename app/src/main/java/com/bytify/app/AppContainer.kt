@@ -61,7 +61,8 @@ import java.util.concurrent.TimeUnit
 /** Dependency injection manual: satu instance untuk seluruh aplikasi. */
 @OptIn(UnstableApi::class)
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    /** Dipakai juga di luar container, mis. memeriksa keadaan panggilan. */
+    val appContext: Context = context.applicationContext
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 

@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.bytify.app.util.PESAN_SEDANG_MENELPON
+import com.bytify.app.util.sedangMenelpon
 import androidx.navigation.NavHostController
 import com.bytify.app.AppContainer
 import com.bytify.app.data.model.Song
@@ -36,6 +38,14 @@ class AppState(
     fun navigate(route: String) = navController.navigate(route) { launchSingleTop = true }
 
     fun play(songs: List<Song>, index: Int = 0) {
+        // Selama panggilan, aplikasi telepon memegang fokus audio secara
+        // eksklusif dan pemutar menolak mulai — tanpa sepatah kata pun, jadi
+        // tombol putar terlihat rusak. Larangannya tidak bisa (dan tidak
+        // boleh) dilanggar; yang diperbaiki adalah diamnya.
+        if (sedangMenelpon(container.appContext)) {
+            toast(PESAN_SEDANG_MENELPON)
+            return
+        }
         container.player.playSongs(songs, index)
     }
 

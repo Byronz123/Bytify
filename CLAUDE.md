@@ -379,6 +379,37 @@ memakai `json.decodeFromStream`. Jangan dikembalikan ke `decodeFromString`.
 - Daemon memanen ulang HANYA serial baru dan yang berstatus "Ongoing". Serial
   "Complete" tidak pernah bertambah episodenya.
 
+### Room, Workers, dan nilai environment
+
+- **Room MEMBANDINGKAN indices saat memvalidasi migrasi.** Index yang dibuat
+  migrasi tetapi tidak dideklarasikan di entitas (atau sebaliknya) mematikan
+  aplikasi saat pertama dibuka: "Migration didn't properly handle: <tabel>",
+  padahal seluruh kolomnya cocok. Sudah terjadi pada `watch_aliases` di A36.
+  Sumber kebenarannya `app/schemas/.../<versi>.json` yang dihasilkan Room —
+  cocokkan migrasi dengan berkas itu, bukan dengan ingatan.
+  Migrasi gagal di-rollback Room dalam transaksi, jadi datanya selamat; tapi
+  aplikasinya tetap mati berulang sampai diperbaiki.
+- **Jangan menyalin `CREATE INDEX` antar tabel tanpa memeriksa kueri-nya.**
+  Index `tmdbId` perlu di `watch_titles` (dikueri `watchTitle(tmdbId, type)`),
+  tetapi mubazir di `watch_aliases` yang hanya dicari lewat kunci utamanya.
+- **`globalThis.fetch` yang diambil LEPAS lalu dipanggil telanjang** membuat
+  `this` undefined. Node 18+ memaafkan, Cloudflare Workers melempar
+  "Illegal invocation" yang keluar sebagai **error 1101 / HTTP 500**. Semua uji
+  lokal bisa lolos dan tetap tidak menangkapnya. Ikat: `(...a) => globalThis.fetch(...a)`.
+- **Bungkus panggilan luar dengan pemeta galat.** Exception yang lolos di
+  Workers jadi 1101 mentah yang tidak memberi tahu apa pun — kepada APK maupun
+  kepada yang men-debug.
+- **Nilai environment yang ditempel sering membawa baris-baru.** Runtime hanya
+  bilang "Invalid header value" tanpa menyebut header mana. `subtitles.mjs`
+  karena itu membersihkan CR/LF/TAB lalu memeriksa ASCII cetak, dan menyebut
+  NAMA variabel beserta kode karakternya kalau masih ada yang liar.
+- **Mengubah environment variable di Cloudflare TIDAK berlaku untuk deployment
+  yang sudah ada.** Harus ada deploy baru. Kalau sebuah variabel tampak tidak
+  terbaca, periksa itu dulu sebelum mencurigai kodenya.
+- **`backend/api/.env` tidak terbaca sendiri.** `loadEnvFile()` dipanggil dari
+  `startServer()`, bukan dari `createApp()`, supaya uji tidak menyerap `.env`
+  mesin pengembang.
+
 ### Proses di Windows
 
 - **`pkill` dari Git Bash TIDAK mematikan proses Windows.** Pakai PowerShell
@@ -519,12 +550,17 @@ kalau ingin angka yang sahih.
       (`DisallowStartIfOnBatteries=True`). Kalau daemon tampak tidak pernah
       jalan, periksa itu dulu sebelum mencurigai skripnya.
 - [ ] Sambungkan Galaxy A36 untuk pengukuran performa yang sahih
-- [ ] Subtitle: proxy & penyambungan pemutar sudah jadi dan teruji (27 uji),
-      tetapi belum pernah menembak OpenSubtitles sungguhan — butuh
-      OPENSUBTITLES_API_KEY + OPENSUBTITLES_TERMS_ACCEPTED=true.
-      `fetch_subtitles.py` yang lama memakai pendekatan panen-lalu-terbit
-      yang tidak bisa dipakai (lihat 3g), dan `cari_imdb_id()`-nya mengambil
-      hasil pencarian TMDB PERTAMA tanpa verifikasi — itu bug salah pasang.
+- [x] Subtitle TERBUKTI bekerja dari produksi: /api/subtitles memulangkan 50
+      kecocokan untuk tmdb 27205, dan /api/subtitles/file mengalihkan ke SRT
+      121.932 byte berisi 1.592 cue. `fetch_subtitles.py` yang lama memakai
+      pendekatan panen-lalu-terbit yang tidak bisa dipakai (lihat 3g), dan
+      `cari_imdb_id()`-nya mengambil hasil pencarian TMDB PERTAMA tanpa
+      verifikasi — itu bug salah pasang. Jangan dipakai.
+- [x] Migrasi Room v11 TERUJI di Galaxy A36 dengan memasang di atas data v10:
+      user_version 11, tiga tabel baru terisi (11.937 / 47 / 20.145), movies
+      51.015 dan sections 7 utuh, nol FATAL EXCEPTION. Chip terjangkau oleh
+      7.172 film LK21 dan 1.018 film Indonesia — diukur dengan JOIN di
+      database perangkat, bukan di PC.
 - [ ] Podcast masih Indonesia saja; radio sudah lintas negara
 - [ ] Status kanal Live TV belum memverifikasi stream hidup/mati
 - [ ] Animasi navigasi belum dibandingkan bingkai-per-bingkai dengan video acuan

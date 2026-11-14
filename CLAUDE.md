@@ -18,7 +18,7 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 | Bagian | Jumlah | Catatan |
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
-| Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH |
+| Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH; 2.486 dapat chip |
 | Anime | 13.094 | 87.430 episode (cap 12/judul); embed framextv, berkas TERPISAH |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
@@ -371,6 +371,33 @@ kolom penanda maupun migrasi baru.
 
 **Ketersediaan TIDAK terpengaruh**: "ada di Netflix" benar untuk seluruh musim,
 jadi chipnya tetap tampil untuk semuanya.
+
+### 3k. Jembatan serial: mode kedua pada pencocok yang sama
+
+`tmdb_match.py --serial` memakai aturan KETAT yang sama persis dengan mode
+film, hanya endpoint dan nama fieldnya yang berbeda (`/search/tv`,
+`first_air_date`, `name`/`original_name`). Satu pencocok, dua mode — bukan dua
+skrip yang harus dijaga sejalan.
+
+Hasilnya 4.155 dari 4.920 (84,5%), laju tertinggi dari ketiga jembatan, karena
+judul serial jauh lebih jarang kembar daripada judul film. Dan ketersediaannya
+50,5% — juga tertinggi, karena serial TV memang jauh lebih banyak ada di
+layanan resmi daripada film.
+
+Serial TIDAK dipecah per musim di katalog (hanya 4 dari 4.920 judulnya
+berpenanda musim), jadi tidak ada beberapa entri yang menunjuk satu id TMDB
+seperti pada anime. 48 "judul kembar" yang ada sebetulnya remake beda tahun
+(GTO 1998/2012/2026) dan justru dipilah benar oleh aturan tahun.
+
+**Subtitle per-episode untuk serial DITUNDA, dan ini penting.** Seluruh 65.296
+episode bernomor **musim 1** — situs sumbernya meratakan penomoran. Untuk acara
+yang di TMDB punya beberapa musim, "musim 1 episode 30" akan memulangkan
+subtitle musim yang SALAH, dan kita belum menyimpan jumlah musim TMDB untuk
+memilahnya. Jadi `amanSubtitlePerEpisode()` memulangkan false untuk id
+berawalan "series-". Ketersediaannya tidak terpengaruh: itu per-acara.
+
+Kalau nanti mau dibuka, yang dibutuhkan: simpan `number_of_seasons` saat panen,
+lalu izinkan subtitle hanya untuk acara bermusim tunggal.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 

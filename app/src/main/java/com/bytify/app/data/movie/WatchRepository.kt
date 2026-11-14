@@ -224,9 +224,20 @@ class WatchRepository(
      * Ketersediaan TIDAK terpengaruh: "ada di Netflix" tetap benar untuk
      * seluruh musim, jadi chipnya tetap tampil.
      */
-    suspend fun amanSubtitlePerEpisode(tmdbId: Int, tipe: String): Boolean =
+    suspend fun amanSubtitlePerEpisode(idFilm: String, tmdbId: Int, tipe: String): Boolean =
         withContext(Dispatchers.Default) {
             if (tipe != "tv") return@withContext true
+
+            // Serial lk21/nontondrama: SELURUH 65.296 episodenya bernomor
+            // musim 1, karena situs sumbernya meratakan penomoran. Untuk acara
+            // yang di TMDB punya beberapa musim, "musim 1 episode 30" akan
+            // memulangkan subtitle musim yang salah, dan kita belum punya data
+            // jumlah musim TMDB untuk memilahnya. Jadi subtitle per-episode
+            // untuk serial DITUNDA sampai itu terjawab — chip ketersediaannya
+            // tetap tampil, karena itu per-acara dan tidak bergantung musim.
+            if (idFilm.startsWith("series-")) return@withContext false
+
+            // Anime: beberapa entri AniList (musim) menunjuk satu entri TMDB.
             val jumlah = runCatching { dao.jumlahAliasUntukTmdb(tmdbId, tipe) }.getOrDefault(0)
             // 0 berarti judul ini tidak lewat alias sama sekali (TMDB id-nya
             // ada di dalam id-nya sendiri), jadi tidak ada ambiguitas musim.

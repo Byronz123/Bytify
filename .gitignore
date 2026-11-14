@@ -26,6 +26,9 @@ backend/data/watch_database.json
 backend/data/tmdb_match.json
 backend/data/tmdb_match.json.*tmp
 backend/data/tmdb_match_worklist.json
+backend/data/series_match.json
+backend/data/series_match.json.*tmp
+backend/data/series_match_worklist.json
 # Dataset pemetaan anime (unduhan pihak ketiga) + turunannya.
 backend/data/anime_tmdb_source.json
 backend/data/anime_tmdb_source.json.*tmp

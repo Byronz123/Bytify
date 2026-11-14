@@ -45,6 +45,7 @@ KELUARAN = os.path.join(DIR_DATA, "watch_catalog.json")
 SUMBER_ALIAS = (
     os.path.join(DIR_DATA, "tmdb_match.json"),
     os.path.join(DIR_DATA, "anime_tmdb_map.json"),
+    os.path.join(DIR_DATA, "series_match.json"),
 )
 
 #: Jenis langganan yang dipertahankan, urut dari yang paling berguna bagi

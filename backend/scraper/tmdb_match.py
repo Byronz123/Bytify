@@ -48,8 +48,37 @@ if hasattr(sys.stdout, "reconfigure"):
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 DIR_DATA = os.path.join(DIR, "..", "data")
+#: Dua mode, satu aturan ketat yang sama.
+#:   film   : catalog.json, id "lk21-", /search/movie
+#:   serial : series_catalog.json, id "series-", /search/tv
+#: Serial dipisah karena endpoint pencariannya beda dan field tanggalnya
+#: `first_air_date`, bukan `release_date`.
+MODE = {
+    "film": {
+        "sumber": os.path.join(DIR_DATA, "catalog.json"),
+        "awalan": "lk21-",
+        "endpoint": "/search/movie",
+        "tanggal": "release_date",
+        "judulAsli": "original_title",
+        "type": "movie",
+        "keluaran": os.path.join(DIR_DATA, "tmdb_match.json"),
+        "daftar": os.path.join(DIR_DATA, "tmdb_match_worklist.json"),
+    },
+    "serial": {
+        "sumber": os.path.join(DIR_DATA, "series_catalog.json"),
+        "awalan": "series-",
+        "endpoint": "/search/tv",
+        "tanggal": "first_air_date",
+        "judulAsli": "original_name",
+        "type": "tv",
+        "keluaran": os.path.join(DIR_DATA, "series_match.json"),
+        "daftar": os.path.join(DIR_DATA, "series_match_worklist.json"),
+    },
+}
+AKTIF = MODE["serial"] if "--serial" in sys.argv else MODE["film"]
+
 SUMBER = os.path.join(DIR_DATA, "catalog.json")
-KELUARAN = os.path.join(DIR_DATA, "tmdb_match.json")
+KELUARAN = AKTIF["keluaran"]
 
 UTAS = 14
 SIMPAN_SETIAP = 500
@@ -119,7 +148,7 @@ def kandidat_judul(judul):
 
 def cari_tmdb(kueri):
     q = urllib.parse.urlencode({"api_key": KEY, "query": kueri, "include_adult": "false"})
-    url = "https://api.themoviedb.org/3/search/movie?" + q
+    url = "https://api.themoviedb.org/3" + AKTIF["endpoint"] + "?" + q
     for coba in range(5):
         try:
             r = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -138,8 +167,15 @@ def cari_tmdb(kueri):
 
 
 def tahun_dari(hasil):
-    m = re.match(r"^(\d{4})", str(hasil.get("release_date") or ""))
+    m = re.match(r"^(\d{4})", str(hasil.get(AKTIF["tanggal"]) or ""))
     return int(m.group(1)) if m else None
+
+
+def judul_hasil(h):
+    """TMDB memakai title/original_title untuk film, name/original_name untuk tv."""
+    utama = h.get("title") if AKTIF["type"] == "movie" else h.get("name")
+    asli = h.get(AKTIF["judulAsli"])
+    return utama, asli
 
 
 def cocokkan(film):
@@ -162,9 +198,10 @@ def cocokkan(film):
             tid = h.get("id")
             if not isinstance(tid, int):
                 continue
-            if nk == normal(h.get("title")):
+            utama, asli = judul_hasil(h)
+            if nk == normal(utama):
                 lewat_judul[tid] = h
-            elif nk == normal(h.get("original_title")):
+            elif nk == normal(asli):
                 lewat_asli[tid] = h
 
         # Pemutus BERPRINSIP, bukan skor kemiripan: kalau tepat satu kandidat
@@ -187,10 +224,10 @@ def cocokkan(film):
             tid, h = terpilih
             return "cocok", {
                 "tmdbId": tid,
-                "type": "movie",
+                "type": AKTIF["type"],
                 "via": kueri,
                 "lewat": "judul-utama" if tid in lewat_judul else "judul-asli",
-                "tmdbTitle": h.get("title"),
+                "tmdbTitle": judul_hasil(h)[0],
                 "tmdbYear": tahun_dari(h),
                 "tahunKatalog": tahun,
             }
@@ -200,7 +237,7 @@ def cocokkan(film):
             return "ambigu", {
                 "kueri": kueri,
                 "kandidat": [
-                    {"tmdbId": t, "title": x.get("title"), "year": tahun_dari(x)}
+                    {"tmdbId": t, "title": judul_hasil(x)[0], "year": tahun_dari(x)}
                     for t, x in list(gabung.items())[:5]
                 ],
             }
@@ -208,10 +245,10 @@ def cocokkan(film):
 
 
 def muat_katalog():
-    with open(SUMBER, encoding="utf-8") as f:
+    with open(AKTIF["sumber"], encoding="utf-8") as f:
         d = json.load(f)
     return [m for m in (d.get("movies") or [])
-            if str(m.get("id") or "").startswith("lk21-")]
+            if str(m.get("id") or "").startswith(AKTIF["awalan"])]
 
 
 def muat_hasil():
@@ -284,7 +321,7 @@ def main():
         simpan(h)
         print("[match] %d pulih dari ambigu; kini %d cocok, %d ambigu, %d tanpa"
               % (pulih, len(h["matches"]), len(h["ambigu"]), len(h["tanpa"])))
-        kerja = os.path.join(DIR_DATA, "tmdb_match_worklist.json")
+        kerja = AKTIF["daftar"]
         unik = sorted({(v["type"], v["tmdbId"]) for v in h["matches"].values()})
         with open(kerja, "w", encoding="utf-8") as f:
             json.dump([{"type": a_, "tmdbId": b_} for a_, b_ in unik], f, separators=(",", ":"))
@@ -323,7 +360,7 @@ def main():
           % (c, c * 100.0 / max(total, 1), a, t, total))
 
     # Daftar kerja siap pakai untuk tmdb_watch.py
-    kerja = os.path.join(DIR_DATA, "tmdb_match_worklist.json")
+    kerja = AKTIF["daftar"]
     unik = sorted({(v["type"], v["tmdbId"]) for v in h["matches"].values()})
     with open(kerja, "w", encoding="utf-8") as f:
         json.dump([{"type": a_, "tmdbId": b_} for a_, b_ in unik], f, separators=(",", ":"))

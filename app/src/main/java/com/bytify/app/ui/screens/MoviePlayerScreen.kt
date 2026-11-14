@@ -556,7 +556,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // kita semuanya bernomor musim 1, jadi permintaannya akan memulangkan
         // subtitle musim yang salah. Chip ketersediaannya tetap tampil —
         // "ada di Netflix" benar untuk seluruh musim.
-        if (perEpisode && !ket.amanSubtitlePerEpisode(tmdbId, tipeTmdb)) return@LaunchedEffect
+        if (perEpisode && !ket.amanSubtitlePerEpisode(movie.id, tmdbId, tipeTmdb)) return@LaunchedEffect
 
         subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
             tmdbId = tmdbId,

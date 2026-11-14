@@ -89,7 +89,12 @@ export function createSubtitleService(options = {}, log = console) {
     timeoutMs = 15000,
     defaultLanguages = ['id', 'en'],
     termsAccepted = false,
-    fetchImpl = globalThis.fetch,
+    // DIIKAT ke globalThis. `globalThis.fetch` yang diambil lepas lalu
+    // dipanggil sebagai fungsi telanjang membuat `this` undefined; Node 18+
+    // memaafkannya, tetapi runtime Cloudflare Workers melempar
+    // "Illegal invocation" — yang muncul sebagai error 1101 / HTTP 500 dan
+    // TIDAK pernah terlihat di uji lokal. Sudah terjadi sekali di produksi.
+    fetchImpl = (...a) => globalThis.fetch(...a),
   } = options;
 
   const singgahan = new Map();
@@ -151,6 +156,21 @@ export function createSubtitleService(options = {}, log = console) {
       return { status: 429, error: 'Kuota unduh harian OpenSubtitles habis.' };
     }
     return { status: 502, error: `OpenSubtitles menjawab HTTP ${status}.` };
+  }
+
+  /**
+   * Pembungkus: kegagalan tak terduga apa pun dipetakan ke jawaban
+   * terstruktur. Tanpa ini, satu exception di Workers keluar sebagai error
+   * 1101 / HTTP 500 mentah yang tidak memberi tahu apa pun kepada APK maupun
+   * kepada yang men-debug.
+   */
+  async function aman(nama, fn) {
+    try {
+      return await fn();
+    } catch (e) {
+      log.warn?.(`[subtitles] ${nama} melempar: ${e?.message || e}`);
+      return { status: 502, error: `Layanan subtitle gagal: ${e?.message || 'galat tak dikenal'}` };
+    }
   }
 
   /**
@@ -233,7 +253,12 @@ export function createSubtitleService(options = {}, log = console) {
     };
   }
 
-  return { cari, tautan, get siap() { return siap; }, alasanTidakSiap };
+  return {
+    cari: (opsi) => aman('cari', () => cari(opsi)),
+    tautan: (opsi) => aman('tautan', () => tautan(opsi)),
+    get siap() { return siap; },
+    alasanTidakSiap,
+  };
 }
 
 /**

@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { loadEnvFile } from './src/config.mjs';
 import { subtitleServiceDariEnv } from './src/subtitles.mjs';
 import express from 'express';
 import fs from 'node:fs';
@@ -258,6 +259,17 @@ export function createApp({
 }
 
 export function startServer() {
+    // backend/api/.env TIDAK pernah terbaca sebelum ini: loadEnvFile() ada di
+    // src/config.mjs tetapi tidak dipanggil dari mana pun, jadi seluruh isi
+    // berkas itu — termasuk variabel LIVE_* yang sudah lama ada — hanya
+    // berpengaruh kalau kebetulan juga diekspor di shell.
+    //
+    // Dipanggil di sini, bukan di createApp(), supaya uji yang membangun
+    // createApp() sendiri tidak ikut menyerap .env milik mesin pengembang.
+    // Variabel dari process manager tetap diutamakan; loadEnvFile hanya
+    // mengisi yang belum ada.
+    loadEnvFile();
+
     const port = Number(process.env.PORT) || 8787;
     const host = process.env.HOST || '0.0.0.0';
     const server = createApp().listen(port, host, () => {

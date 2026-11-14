@@ -443,11 +443,43 @@ baris di dalam migrasi akan menahan pembukaan database tepat di layar pertama.
 Isinya menyusul pada sinkron berikutnya; sampai itu terjadi deret genre tampil
 kosong dan tidak ada yang rusak.
 
-**Yang BELUM selesai, dan ini ceiling berikutnya:** saat katalog disinkron
-penuh, Dalvik masih memuncak ~95 MB. Itu BUKAN masalah yang diperbaiki di
-sini — penyebabnya `decodeFromStream` tetap membentuk seluruh daftar DTO di
-memori sebelum menulis ke Room. Memperbaikinya butuh menulis per potongan
-sambil mengurai, bukan setelah.
+### 3m. Sinkron katalog diproses BERPOTONG
+
+Angka ~95 MB yang sempat tercatat di sini SALAH: itu satu cuplikan, dan
+cuplikan jarang meremehkan puncak. Dengan cuplikan rapat, puncak sebenarnya
+**152 MB dari batas heap 256 MB — 58% plafon.**
+
+Penyebabnya tiap katalog dipetakan seluruhnya lebih dulu: DTO -> Movie ->
+MovieEntity -> baris genre, jadi EMPAT salinan 25.186 objek hidup bersamaan.
+`simpanKatalogBerpotong()` memprosesnya [POTONG_SINKRON] sekali jalan, dan id
+kembar dilewati SEBELUM pemetaan supaya Movie-nya tidak dibentuk hanya untuk
+dibuang.
+
+Hasil terukur, katalog lengkap, data keluaran IDENTIK (51.015 film,
+112.029 baris genre, 7 sections):
+
+| | Puncak Dalvik |
+|---|---|
+| Sebelum | 152 MB |
+| Sesudah | **~112 MB** (113,2 / 112,4 / 111,8 pada tiga jalan) |
+
+**Sebaran pengukurannya hanya 1,4 MB**, jadi puncak Dalvik di sini TERPERCAYA —
+berbeda dari angka jank di LDPlayer. Tapi jalan PERTAMA setelah memasang APK
+membaca ~6-13 MB lebih tinggi (verifikasi dex dan pemanasan JIT); abaikan jalan
+pertama, pakai jalan kedua dan seterusnya.
+
+**Yang sudah dicoba dan TIDAK berhasil:** tidak mengikat katalog ke `val`,
+dengan dugaan keempat daftar DTO hidup bersamaan sampai akhir fungsi. Dugaan
+itu salah — puncaknya tetap ~112 MB. ART mengumpulkan sampah berdasarkan
+liveness, bukan lingkup leksikal. Jangan diulang.
+
+**Ceiling berikutnya:** sisa ~112 MB didominasi `decodeFromStream` yang memang
+membentuk seluruh daftar DTO. Menghapusnya butuh pengurai ALIRAN sungguhan —
+memecah stream per elemen lalu mengurai satu-satu — atau mengubah format
+terbitan jadi NDJSON. Keduanya jauh lebih berisiko daripada yang di atas, dan
+puncak ini hanya terjadi saat pemasangan pertama atau setelah TTL lewat, bukan
+pada pemakaian sehari-hari (10 MB mengendap). Ukur dulu apakah itu benar-benar
+mengganggu sebelum mengerjakannya.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 

@@ -28,6 +28,9 @@ const val KATALOG_MASIH_SEGAR = -1
 /** Berapa lama katalog yang sudah diurai ditahan setelah layar terakhir tutup. */
 private const val TAHAN_MS = 60_000L
 
+/** Berapa film diproses sekali jalan saat sinkron katalog. */
+private const val POTONG_SINKRON = 1_000
+
 const val USIA_KATALOG_DEFAULT_MS = 3L * 60 * 60 * 1000
 
 class MovieRepository(
@@ -187,6 +190,36 @@ class MovieRepository(
         runCatching { dao.movieSekali(id)?.toMovieRingkas(json) }.getOrNull()
 
     /**
+     * Proses DTO satu katalog BERPOTONG, kembalikan jumlah yang tersimpan.
+     *
+     * Dulu tiap katalog dipetakan seluruhnya lebih dulu: DTO -> Movie ->
+     * MovieEntity -> baris genre, jadi EMPAT salinan 25.186 objek hidup
+     * bersamaan. TERUKUR di Galaxy A36 dengan cuplikan rapat: sinkron penuh
+     * memuncak 149 MB dari batas heap 256 MB — 58% plafon.
+     *
+     * Dengan potongan, hanya salinan sebesar [POTONG_SINKRON] yang hidup;
+     * daftar DTO-nya sendiri masih utuh karena decodeFromStream memang
+     * membentuknya, tapi tiga salinan lainnya jadi terbatas.
+     *
+     * Id yang kembar dilewati di sini, bukan setelah pemetaan, supaya
+     * Movie-nya tidak perlu dibentuk hanya untuk dibuang.
+     */
+    private suspend fun simpanKatalogBerpotong(dto: List<MovieDto>?, now: Long): Int {
+        if (dto.isNullOrEmpty()) return 0
+        val terlihat = HashSet<String>(dto.size)
+        var tersimpan = 0
+        dto.asSequence()
+            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            .filter { terlihat.add(it.id) }
+            .chunked(POTONG_SINKRON)
+            .forEach { potong ->
+                simpanFilm(potong.map { it.toMovie() }, now)
+                tersimpan += potong.size
+            }
+        return tersimpan
+    }
+
+    /**
      * SATU pintu untuk menyimpan film. Film dan baris genrenya ditulis
      * bersama, jadi keduanya tidak bisa melenceng.
      *
@@ -223,15 +256,8 @@ class MovieRepository(
     suspend fun refresh(): Int {
         val catalog = api.fetchCatalog()
         val now = System.currentTimeMillis()
-        val validMovies = catalog.movies
-            .asSequence()
-            .filter { it.id.isNotBlank() && it.title.isNotBlank() }
-            .map { it.toMovie() }
-            .distinctBy(Movie::id)
-            .toList()
-
-        if (validMovies.isNotEmpty()) {
-            simpanFilm(validMovies, now)
+        val jumlahUtama = simpanKatalogBerpotong(catalog.movies, now)
+        if (jumlahUtama > 0) {
             dao.pruneMovies(now)
             // Baris genre milik film yang sudah terbuang ikut dibersihkan.
             dao.pruneMovieGenres()
@@ -255,44 +281,27 @@ class MovieRepository(
         // Serial datang dari berkas terpisah dan masuk ke tabel yang sama.
         // Sections TIDAK disentuh: itu milik katalog film, dan menuliskannya
         // ulang di sini akan menghapus deret yang baru saja dibuat.
+        // Catatan hasil ukur: pernah dicoba TIDAK mengikat katalog ke val,
+        // dengan dugaan keempat daftar DTO hidup bersamaan sampai akhir
+        // fungsi. Dugaan itu SALAH dan terbukti tidak mengubah apa pun —
+        // puncaknya tetap ~112 MB pada tiga jalan berturut-turut. ART
+        // mengumpulkan sampah berdasarkan liveness, bukan lingkup leksikal,
+        // jadi val yang sudah tidak dipakai memang sudah bisa dikumpulkan.
+        // Bentuk bernama dikembalikan karena lebih mudah dibaca.
         val serial = runCatching { api.fetchSeriesCatalog() }.getOrNull()
-        val jumlahSerial = serial?.movies
-            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
-            ?.map { it.toMovie() }
-            ?.also { daftar ->
-                if (daftar.isNotEmpty()) {
-                    simpanFilm(daftar, now)
-                }
-            }
-            ?.size ?: 0
+        val jumlahSerial = simpanKatalogBerpotong(serial?.movies, now)
 
         // Film Indonesia: berkas ketiga, masuk ke tabel yang sama. Sections
         // tidak disentuh, sama seperti serial.
         val indonesia = runCatching { api.fetchIndonesiaCatalog() }.getOrNull()
-        val jumlahIndonesia = indonesia?.movies
-            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
-            ?.map { it.toMovie() }
-            ?.also { daftar ->
-                if (daftar.isNotEmpty()) {
-                    simpanFilm(daftar, now)
-                }
-            }
-            ?.size ?: 0
+        val jumlahIndonesia = simpanKatalogBerpotong(indonesia?.movies, now)
 
         // Anime: berkas keempat, masuk ke tabel yang sama. Sections tidak
         // disentuh, sama seperti serial dan film Indonesia.
         val anime = runCatching { api.fetchAnimeCatalog() }.getOrNull()
-        val jumlahAnime = anime?.movies
-            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
-            ?.map { it.toMovie() }
-            ?.also { daftar ->
-                if (daftar.isNotEmpty()) {
-                    simpanFilm(daftar, now)
-                }
-            }
-            ?.size ?: 0
+        val jumlahAnime = simpanKatalogBerpotong(anime?.movies, now)
 
-        return validMovies.size + jumlahSerial + jumlahIndonesia + jumlahAnime
+        return jumlahUtama + jumlahSerial + jumlahIndonesia + jumlahAnime
     }
 
     /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */

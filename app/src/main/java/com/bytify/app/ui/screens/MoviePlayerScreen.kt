@@ -718,10 +718,45 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             if (url.isBlank() || !terlihat.add(url)) return
             hasil += PilihanServer(nama.ifBlank { "server" }, url, referer)
         }
-        tambah("utama", videoUrl, movie.sourceUrl)
+        // Nama server yang sedang dipakai diambil dari katalog kalau ada, bukan
+        // dilabeli "utama" begitu saja — supaya ia ikut terhitung sebagai
+        // keluarga penyedia yang sama pada penyusunan di bawah.
+        tambah(
+            movie.servers.firstOrNull { it.url == videoUrl }?.server ?: "utama",
+            videoUrl,
+            movie.sourceUrl,
+        )
         movie.servers.forEach { tambah(it.server, it.url, movie.sourceUrl) }
         serverEkstra.forEach { tambah(it.server, it.url, it.url) }
-        hasil
+
+        // Cermin dari penyedia yang SAMA didorong ke belakang antrean.
+        //
+        // Terukur di Galaxy A36: keempat "cermin" framextv (xyz, cc, pro, tech)
+        // sama-sama DIALIHKAN ke framextv.cc dan memakai satu backend yang sama
+        // (api.framextv.tech, yang membalas HTTP 429). Jadi mereka bukan cermin
+        // yang bisa saling menggantikan, melainkan satu server yang dicoba
+        // empat kali — membuang sekitar 54 detik sebelum penyedia yang
+        // BENAR-BENAR berbeda sempat dicoba, sekaligus ikut memancing rate
+        // limit itu sendiri.
+        //
+        // Dikelompokkan menurut NAMA, bukan domain: server LK21 p2p, hydrax,
+        // dan turbovip sama-sama berada di videonode.de tetapi benar-benar
+        // pemutar yang berbeda, dan mengelompokkannya menurut domain akan
+        // merusak jalur LK21 yang sudah terbukti.
+        //
+        // Tidak dibuang, hanya diturunkan: kalau semua yang lain gagal, cermin
+        // itu tetap dicoba di akhir.
+        val keluarga = mutableSetOf<String>()
+        val pertama = mutableListOf<PilihanServer>()
+        val cermin = mutableListOf<PilihanServer>()
+        hasil.forEach { pilihan ->
+            if (keluarga.add(pilihan.nama.substringBefore('-'))) {
+                pertama += pilihan
+            } else {
+                cermin += pilihan
+            }
+        }
+        pertama + cermin
     }
 
     // Indeks server yang sedang dicoba. Berpindah server juga cara situs sumber
@@ -1234,7 +1269,8 @@ private fun EmbedVideoStage(
     // berjalan laporan apa pun diabaikan: setelah video jalan, permintaan yang
     // gagal tidak boleh membuat pemutar berpindah server dan memulai dari nol.
     val gagalUrlIni: (String?) -> Boolean = { alamat ->
-        !sudahMain.get() && alamat != null && alamat.equals(videoUrl, ignoreCase = true)
+        !sudahMain.get() && !sudahSiap.get() &&
+            alamat != null && alamat.equals(videoUrl, ignoreCase = true)
     }
 
     // Berkas subtitle diambil dengan OkHttp (tidak terkena CORS), diurai jadi
@@ -1361,11 +1397,25 @@ private fun EmbedVideoStage(
                                 val target = baseDomainOf(reqUrl)
                                 if (target != null && target !in allowedDomains) {
                                     Log.w(EMBED_TAG, "navigasi frame utama ditahan: $target")
-                                    // Pengalihan keluar domain player = gerbang
-                                    // Referer gagal, atau judul ini tidak ada
-                                    // di penyedia tersebut. Dua-duanya berarti
-                                    // server ini tidak akan berputar.
-                                    if (!sudahMain.get()) onGagal(videoUrl)
+                                    // Pengalihan keluar domain player BISA berarti
+                                    // dua hal yang sangat berbeda, dan membedakannya
+                                    // menentukan: gerbang Referer gagal (server
+                                    // memang tidak akan berputar), ATAU sekadar
+                                    // popunder iklan yang baru saja kita tahan.
+                                    //
+                                    // Pembedanya waktu: gerbang Referer gagal
+                                    // SEBELUM ada sumber, sedangkan popunder muncul
+                                    // kapan saja — sering justru setelah pemutar
+                                    // hidup. Terukur di Galaxy A36: hydrax melapor
+                                    // BYTIFY_SIAP, lalu 0,4 detik kemudian iklan
+                                    // decafeligiblyhad.com ditahan, dan server yang
+                                    // SUDAH punya sumber ikut dibuang.
+                                    //
+                                    // Kalau server ini ternyata benar-benar mati
+                                    // setelah siap, watchdog BATAS_SABAR_MS tetap
+                                    // menangkapnya — jadi penjaga ini tidak bisa
+                                    // membuat pemutar menggantung.
+                                    if (!sudahMain.get() && !sudahSiap.get()) onGagal(videoUrl)
                                     return true
                                 }
                             }
@@ -1437,7 +1487,9 @@ private fun EmbedVideoStage(
                                             // berarti apa-apa. shouldIntercept
                                             // berjalan di utas latar, jadi
                                             // laporannya dikirim lewat post().
-                                            if (reqUrl == videoUrl.lowercase() && !sudahMain.get()) {
+                                            if (reqUrl == videoUrl.lowercase() &&
+                                                !sudahMain.get() && !sudahSiap.get()
+                                            ) {
                                                 view?.post { onGagal(videoUrl) }
                                             }
                                             return@runCatching null

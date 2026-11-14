@@ -269,7 +269,7 @@ private fun ketukOtomatis(web: WebView, sudahMain: AtomicBoolean, percobaan: Int
     }, if (percobaan == 0) 2500L else 3000L)
 }
 
-private const val EMBED_USER_AGENT =
+internal const val EMBED_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 

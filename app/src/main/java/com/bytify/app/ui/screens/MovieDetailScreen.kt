@@ -3,9 +3,11 @@ package com.bytify.app.ui.screens
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -53,8 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.bytify.app.data.movie.KetersediaanResmi
 import com.bytify.app.ui.LocalBottomInset
@@ -79,6 +79,49 @@ private val URUT_JENIS = listOf("flatrate", "free", "ads", "rent", "buy")
 
 /** Atribusi sumber katalog; dulu dikirim per film padahal nilainya seragam. */
 private const val LISENSI_BAWAAN = "LK21 Stream Adapter"
+
+private const val TRAILER_TAG = "BytifyTrailer"
+
+/**
+ * Origin yang dipakai halaman pembungkus trailer.
+ *
+ * Domain Bytify sendiri, dan memang domain yang benar-benar ada — meski
+ * halamannya tidak pernah diambil dari jaringan (dijawab sendiri oleh
+ * `shouldInterceptRequest`), origin inilah yang dilihat YouTube sebagai
+ * penyemat.
+ */
+private const val ASAL_TRAILER = "https://bytify-api.pages.dev"
+
+/**
+ * Pembungkus beriframe untuk pemutar YouTube.
+ *
+ * Tinggi iframe dipaksa dengan posisi absolut, bukan persen: tinggi persen
+ * tidak teresolusi di dalam WebView dan membuat iframe setinggi 0 piksel —
+ * jebakan yang sama yang sudah tercatat untuk pemutar film.
+ */
+private fun halamanTrailer(alamat: String): String = """
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;padding:0;background:#000;width:100%;height:100%;overflow:hidden}
+iframe{position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100vh;border:0;display:block}</style>
+<script>
+// Jaring pengaman tinggi iframe, sama seperti di pembungkus pemutar film.
+// Tanpa ini iframe berakhir setinggi 0 piksel dan layar tampak hitam —
+// persis jebakan yang sudah tercatat di CLAUDE.md, dan trailer sempat
+// terkena justru karena memakai height:100% alih-alih 100vh + penyesuai ini.
+function bytifyFit() {
+  var f = document.querySelector('iframe');
+  var h = window.innerHeight || document.documentElement.clientHeight || 0;
+  if (f && h > 0 && f.offsetHeight !== h) { f.style.height = h + 'px'; }
+}
+window.addEventListener('resize', bytifyFit);
+window.addEventListener('load', bytifyFit);
+setInterval(bytifyFit, 400);
+</script>
+</head><body><iframe src="$alamat"
+ allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+ allowfullscreen></iframe></body></html>
+""".trimIndent()
 
 /**
  * Id video YouTube dari berbagai bentuk tautan trailer yang ada di katalog.
@@ -121,12 +164,28 @@ private fun idYouTube(url: String?): String? {
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun DialogTrailer(idVideo: String, judul: String, onTutup: () -> Unit) {
-    Dialog(
-        onDismissRequest = onTutup,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+private fun LapisanTrailer(idVideo: String, judul: String, onTutup: () -> Unit) {
+    // Halaman PEMBUNGKUS beralamat di domain Bytify, bukan di youtube.com.
+    //
+    // Terukur di Galaxy A36, dan inilah kuncinya: ketika pembungkusnya sendiri
+    // beralamat youtube.com, YouTube melihat dirinya menyemat dirinya dan
+    // menolak dengan "Error code: 152 - 4" untuk SETIAP judul (Inception dan
+    // Interstellar sama-sama ditolak, jadi ini sistematis, bukan batasan
+    // per-video). Memuat /embed/<id> langsung juga ditolak, dengan 153.
+    // Penyemat harus tampak sebagai pihak ketiga yang wajar — persis seperti
+    // situs mana pun yang menanam pemutar YouTube.
+    val alamatPembungkus = remember(idVideo) { "$ASAL_TRAILER/trailer?v=$idVideo" }
+    val alamatEmbed = remember(idVideo) {
+        "https://www.youtube.com/embed/$idVideo" +
+            "?autoplay=1&playsinline=1&rel=0&modestbranding=1" +
+            "&origin=" + java.net.URLEncoder.encode(ASAL_TRAILER, "UTF-8")
+    }
+    BackHandler(onBack = onTutup)
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.94f)),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp).background(Color.Black)) {
+        Box(Modifier.fillMaxWidth().background(Color.Black)) {
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
@@ -138,31 +197,88 @@ private fun DialogTrailer(idVideo: String, judul: String, onTutup: () -> Unit) {
                             // Tanpa ini autoplay ditahan sampai ada sentuhan,
                             // dan trailer tampak macet di bingkai pertama.
                             mediaPlaybackRequiresUserGesture = false
+                            // UA bawaan WebView membawa token "; wv)" dan
+                            // sebagian penyedia memperlakukannya berbeda.
+                            // Disamakan dengan pemutar film supaya kedua jalur
+                            // menghadap layanan dengan identitas yang sama.
+                            userAgentString = EMBED_USER_AGENT
                         }
-                        webChromeClient = WebChromeClient()
-                        webViewClient = WebViewClient()
-                        // YouTube menolak pemutar embed yang dimuat tanpa origin
-                        // yang sah. Terukur di perangkat: memuat /embed/<id>
-                        // sebagai alamat langsung memberi "Error 153 — terjadi
-                        // error pada konfigurasi pemutar video". Dokumen kecil
-                        // ini dimuat DENGAN base URL youtube.com, sehingga
-                        // iframe di dalamnya berjalan pada origin yang diterima.
-                        val halaman = """
-                            <!DOCTYPE html><html><head>
-                            <meta name="viewport" content="width=device-width,initial-scale=1">
-                            <style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
-                            iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style>
-                            </head><body><iframe
-                             src="https://www.youtube.com/embed/$idVideo?autoplay=1&playsinline=1&rel=0&modestbranding=1"
-                             allow="autoplay; encrypted-media; picture-in-picture"
-                             allowfullscreen></iframe></body></html>
-                        """.trimIndent()
-                        loadDataWithBaseURL("https://www.youtube.com", halaman, "text/html", "utf-8", null)
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onConsoleMessage(msg: android.webkit.ConsoleMessage?): Boolean {
+                                Log.i(TRAILER_TAG, "konsol: ${msg?.message()}")
+                                return true
+                            }
+                        }
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                Log.i(TRAILER_TAG, "selesai memuat: $url")
+                            }
+
+                            /**
+                             * Dokumen UTAMA dijawab sendiri dengan pembungkus
+                             * beriframe, sehingga halamannya benar-benar
+                             * beralamat di youtube.com dan iframe di dalamnya
+                             * membawa Origin serta Referer yang sah.
+                             *
+                             * loadDataWithBaseURL TIDAK bisa dipakai di sini —
+                             * sudah dicoba dan gagal di perangkat: Chromium
+                             * memberi dokumen hasil data origin buram, jadi
+                             * YouTube menolaknya tanpa satu pun pesan konsol
+                             * maupun galat, dan yang tersisa hanya layar hitam.
+                             *
+                             * Hanya frame UTAMA yang dicegat; permintaan iframe
+                             * ke alamat yang sama diteruskan apa adanya ke
+                             * YouTube, kalau tidak pembungkusnya memanggil
+                             * dirinya sendiri tanpa henti.
+                             */
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?,
+                            ): android.webkit.WebResourceResponse? {
+                                if (request?.isForMainFrame != true) return null
+                                if (request.url.toString() != alamatPembungkus) return null
+                                return android.webkit.WebResourceResponse(
+                                    "text/html",
+                                    "UTF-8",
+                                    java.io.ByteArrayInputStream(
+                                        halamanTrailer(alamatEmbed).toByteArray(Charsets.UTF_8),
+                                    ),
+                                )
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?,
+                                error: android.webkit.WebResourceError?,
+                            ) {
+                                Log.w(
+                                    TRAILER_TAG,
+                                    "galat ${if (request?.isForMainFrame == true) "UTAMA" else "sub"}: " +
+                                        "${request?.url} -> ${error?.description}",
+                                )
+                            }
+
+                            override fun onReceivedHttpError(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?,
+                                errorResponse: android.webkit.WebResourceResponse?,
+                            ) {
+                                Log.w(
+                                    TRAILER_TAG,
+                                    "HTTP ${errorResponse?.statusCode} pada ${request?.url}",
+                                )
+                            }
+                        }
+                        // Alamat SUNGGUHAN yang dimuat, bukan dokumen data:
+                        // dengan begitu halamannya punya origin https yang sah.
+                        // Isinya dijawab sendiri oleh shouldInterceptRequest di
+                        // atas, jadi tidak ada permintaan jaringan untuk ini.
+                        loadUrl(alamatPembungkus)
                     }
                 },
                 onRelease = { web ->
                     // about:blank dulu, baru destroy: tanpa itu suara trailer
-                    // bisa terus berbunyi setelah dialognya ditutup.
+                    // bisa terus berbunyi setelah lapisannya ditutup.
                     web.stopLoading()
                     web.loadUrl("about:blank")
                     web.destroy()
@@ -219,6 +335,7 @@ fun MovieDetailScreen(movieId: String) {
     var trailerDibuka by remember(item.id) { mutableStateOf(false) }
 
     val isFavorite = item.id in favoriteIds
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = LocalBottomInset.current + 24.dp),
     ) {
@@ -382,10 +499,6 @@ fun MovieDetailScreen(movieId: String) {
             }
         }
 
-        if (trailerDibuka && idTrailer != null) {
-            DialogTrailer(idTrailer, item.title) { trailerDibuka = false }
-        }
-
         if (item.subtitles.isNotEmpty()) {
             Text("Subtitle tersedia", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             item.subtitles.forEach { subtitle ->
@@ -434,6 +547,16 @@ fun MovieDetailScreen(movieId: String) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+
+    // Trailer digambar di jendela yang SAMA dengan halaman ini, bukan sebagai
+    // Dialog. Catatan jujur: Dialog sempat dicurigai sebagai penyebab layar
+    // hitam dan ternyata BUKAN — penyebabnya User-Agent (lihat di bawah).
+    // Bentuk lapisan tetap dipertahankan karena tidak membuka jendela kedua
+    // dan tombol Kembali bisa ditangani langsung dengan BackHandler.
+        if (trailerDibuka && idTrailer != null) {
+            LapisanTrailer(idTrailer, item.title) { trailerDibuka = false }
         }
     }
 }

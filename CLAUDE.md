@@ -601,13 +601,30 @@ trailer dan SEMUANYA YouTube (20.095 `watch?v=`, 200 `youtu.be/`, 105 bentuk
 youtube.com lain), jadi satu pengurai `idYouTube()` cukup; bentuk yang tidak
 dikenali tetap jatuh ke aplikasi luar.
 
-**Memuat `youtube.com/embed/<id>` sebagai alamat langsung TIDAK bekerja** —
-terukur di perangkat, hasilnya "Error 153: terjadi error pada konfigurasi
-pemutar video", karena halaman pemuatnya tidak punya origin yang sah. Yang
-dipakai dokumen pembungkus kecil yang dimuat dengan `loadDataWithBaseURL` ber-
-base `https://www.youtube.com`, sehingga iframe di dalamnya berjalan pada origin
-yang diterima. Catatan 3n soal `loadDataWithBaseURL` tidak berlaku di sini:
-yang dibutuhkan YouTube origin, bukan header Referer.
+**Tiga cara yang GAGAL, semuanya terukur di Galaxy A36.** Dicatat lengkap
+karena ketiganya tampak masuk akal dan masing-masing memakan satu putaran
+pasang-uji:
+
+| Cara | Hasil |
+|---|---|
+| `loadUrl("youtube.com/embed/<id>")` langsung | **Error 153** — konfigurasi pemutar |
+| `loadDataWithBaseURL(base youtube.com, ...)` | layar hitam, **nol** pesan konsol dan nol galat; Chromium memberi dokumen data origin BURAM, jadi penolakannya senyap |
+| pembungkus di-host pada alamat `youtube.com/embed/...` | **Error 152 - 4** untuk SETIAP judul — Inception dan Interstellar sama-sama ditolak, jadi ini bukan batasan per-video melainkan YouTube menolak dirinya menyemat dirinya |
+
+**Yang bekerja:** halaman pembungkus beralamat di domain Bytify sendiri
+(`ASAL_TRAILER` = https://bytify-api.pages.dev), dijawab sendiri oleh
+`shouldInterceptRequest` sehingga tidak ada permintaan jaringan untuknya, dengan
+iframe ke `youtube.com/embed/<id>?...&origin=<ASAL_TRAILER>`. Dengan begitu
+penyematnya tampak sebagai pihak ketiga yang wajar, persis seperti situs mana
+pun yang menanam pemutar YouTube. TERBUKTI berputar untuk Inception dan
+Interstellar.
+
+**Jebakan tinggi iframe berlaku di sini juga, dan sempat menipu.** Pembungkus
+trailer mula-mula memakai `height:100%`, dan hasilnya layar hitam — persis
+jebakan yang sudah tercatat di keputusan 4 untuk pemutar film. Yang benar
+`height:100vh` DITAMBAH penyesuai `bytifyFit()` yang menyetel tinggi dalam
+piksel. Hitam karena iframe 0 piksel tidak bisa dibedakan dari hitam karena
+ditolak YouTube, jadi perbaiki tingginya DULU sebelum mencurigai hal lain.
 
 Pemutarnya sengaja TERPISAH dari `EmbedVideoStage`: pelewat gerbang iklan,
 penyuntik subtitle, dan ketukan otomatis tidak diperlukan untuk YouTube dan
@@ -843,7 +860,15 @@ kalau ingin angka yang sahih.
 - [ ] Tugas terjadwal bawaannya TIDAK berjalan saat laptop memakai baterai
       (`DisallowStartIfOnBatteries=True`). Kalau daemon tampak tidak pernah
       jalan, periksa itu dulu sebelum mencurigai skripnya.
-- [ ] Sambungkan Galaxy A36 untuk pengukuran performa yang sahih
+- [x] TERBUKTI di Galaxy A36 (SM-A366B, Android 17): film Inception BERPUTAR —
+      `BYTIFY_MAIN` muncul 5 detik setelah tombol ditekan, status "Server 1 dari
+      6 berjalan", chip server katalog + turunan tampil berdampingan, subtitle
+      Indonesia/English ikut terisi. Trailer Inception dan Interstellar juga
+      berputar di dalam aplikasi. Nol FATAL EXCEPTION, Dalvik 16,9 MB mengendap,
+      TOTAL PSS 196 MB — sejalan dengan angka 3l.
+      CATATAN: LDPlayer memalsukan profil perangkat (model PJH110/OPPO) tetapi
+      ABI-nya `x86_64`; perangkat fisik ber-ABI `arm64-v8a`. Periksa ABI, bukan
+      model, untuk tahu sedang menguji di mana.
 - [x] Subtitle TERBUKTI bekerja dari produksi: /api/subtitles memulangkan 50
       kecocokan untuk tmdb 27205, dan /api/subtitles/file mengalihkan ke SRT
       121.932 byte berisi 1.592 cue. `fetch_subtitles.py` yang lama memakai

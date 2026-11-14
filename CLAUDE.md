@@ -64,6 +64,9 @@ backend/scraper/tmdb_match.py          judul katalog LK21 -> TMDB id, KETAT:
                                        judul ternormalkan sama persis + tahun ±1,
                                        yang ambigu dilewati. Bisa dilanjutkan.
 backend/api/src/subtitles.mjs          proxy OpenSubtitles; kunci hanya di server
+backend/scraper/probe_servers.py       mengukur penyedia embed berkunci TMDB id
+                                       mana yang betul menjawab; menentukan
+                                       URUTAN RUTE di ServerTambahan.kt
 backend/scraper/fetch_subtitles.py     OpenSubtitles + TMDB -> backend/data/subtitles/
 backend/scraper/auto_sync_daemon.py    crawl -> build -> Live TV -> commit & push
 backend/scraper/update_bytify.bat      pembungkus daemon; menyetel PYTHONIOENCODING
@@ -100,6 +103,8 @@ app/src/main/java/com/bytify/app/
   data/live/LiveCatalogApi.kt          pengunduh kanal (decodeFromStream)
   data/remote/ChartsRepository.kt      tangga lagu & album Apple RSS, TTL 3 jam
   data/movie/WatchRepository.kt         ketersediaan resmi; akses BERTITIK, tanpa Flow penuh
+  data/movie/ServerTambahan.kt          server embed DITURUNKAN dari TMDB id;
+                                        tanpa berkas terbitan, tanpa tabel baru
   data/db/BytifyDatabase.kt            Room v11, MIGRATION_8_9, 9_10 & 10_11
   ui/screens/MoviePlayerScreen.kt      WebView, bypass gerbang iklan, subtitle
   ui/screens/HomeScreen.kt             mix personal acak, album, grid 2 baris
@@ -480,6 +485,72 @@ terbitan jadi NDJSON. Keduanya jauh lebih berisiko daripada yang di atas, dan
 puncak ini hanya terjadi saat pemasangan pertama atau setelah TTL lewat, bukan
 pada pemakaian sehari-hari (10 MB mengendap). Ukur dulu apakah itu benar-benar
 mengganggu sebelum mengerjakannya.
+
+### 3n. Server cadangan DITURUNKAN dari TMDB id, dan pemutar menelusurinya sendiri
+
+Dua hal yang dulu terpisah, sekarang satu: dari mana server cadangan datang,
+dan apa yang terjadi kalau sebuah server gagal.
+
+**Tidak ada berkas katalog baru untuk ini, dan itu disengaja.** Rute embed
+penyedia pihak ketiga hanya berisi TMDB id, jadi URL-nya deterministik.
+Menerbitkannya berarti menuliskan beberapa URL untuk tiap judul — sekitar
+9 MiB berkas baru plus tabel Room baru — hanya untuk menyimpan sesuatu yang
+bisa dihitung ulang dari satu bilangan yang SUDAH ada di `watch_aliases`
+(32.024 baris: 20.145 LK21, 7.724 anime, 4.155 serial). `ServerTambahan.kt`
+menurunkannya di aplikasi: nol bait terbitan, nol tabel baru, nol baris baru
+di `movies`. Terbukti di perangkat — 32.024 alias terisi setelah pemasangan
+bersih, dan film `tmdb-1812324` mendapat 7 server padahal katalognya memberi 5.
+
+**Scraper cinevo/123movies TIDAK dipakai untuk ini.** Keluaran cinevo memasang
+keempat penyedia ke SELURUH 50.072 entrinya (terbaca di
+`cinevo_providers_report.json`: 50072 untuk tiap penyedia) — daftar itu dibangun
+dari template, nol hasil panen, jadi mengikis situsnya tidak menambah apa pun
+yang tidak bisa diturunkan sendiri. Metadatanya juga tidak terpakai sesuai 3f:
+97,6% entri bersinopsis `"Watch ..."` dan bercast `["Featured Cast"]`.
+`scrape_123movies.js` lebih jauh lagi: `tmdbId`-nya diambil dari
+`href.match(/-(\d{2,8})/)` alias **post id situsnya sendiri**, bukan TMDB id,
+lalu dipakai membangun URL `vidsrc/autoembed/vidlink`. Menjalankannya akan
+menghasilkan server yang menunjuk FILM YANG SALAH. Jangan dipakai sebagai
+sumber id.
+
+**Urutan penyedia DIUKUR, bukan ditebak** — `probe_servers.py`, 60 TMDB id
+nyata dari katalog sendiri:
+
+| penyedia | kerangka pemutar | catatan |
+|---|---|---|
+| vidlink.pro | 60/60 | HTTP 200 |
+| vidcore.io | 60/60 | HTTP 200 |
+| vidsrc.cc | 0/60 | HTTP 522, origin tumbang |
+| player.autoembed.cc | 0/60 | DNS tidak resolve sama sekali |
+
+`autoembed` TIDAK dipasang: nama yang tidak resolve di jaringan juga tidak
+resolve di WebView. `vidsrc` ditaruh paling akhir, bukan dibuang — 522 bisa
+pulih. Jalankan ulang probe-nya untuk menyegarkan urutan. Angka itu syarat
+PERLU, bukan bukti pemutaran: aliran sebenarnya diresolusi JavaScript di dalam
+iframe.
+
+**Failover-nya tiga sinyal gagal, bukan satu timeout.** Sinyal BERHASIL sudah
+lama ada (`BYTIFY_MAIN`). Yang ditambahkan:
+1. pengalihan frame utama keluar domain player,
+2. halaman melapor tak punya sumber (`BYTIFY_GAGAL`),
+3. galat jaringan/HTTP **pada alamat server itu** — dicocokkan lewat URL, BUKAN
+   lewat `isForMainFrame`, karena server hidup di dalam iframe sehingga
+   domain mati muncul sebagai galat SUB-frame,
+4. dan baru terakhir ambang `BATAS_TUNGGU_MS` (18 detik).
+
+Ambangnya sengaja longgar: `ketukOtomatis()` melewati gerbang iklan sampai
+~23 detik, jadi ambang rapat justru meninggalkan server yang sedang berhasil.
+
+Dua penjaga yang jangan dilepas: laporan gagal dari WebView yang sudah
+ditinggalkan diabaikan dengan membandingkan URL-nya (tanpa itu satu kegagalan
+basi melompati server yang baru dipasang), dan setelah `BYTIFY_MAIN` semua
+laporan gagal diabaikan (iklan yang gagal tidak boleh memindahkan server dan
+memulai film dari nol).
+
+Untuk serial, server turunan memakai ULANG penjaga
+`amanSubtitlePerEpisode()` — masalahnya identik dengan 3j/3k: semua episode
+bernomor musim 1, jadi untuk judul yang berbagi entri TMDB, "musim 1 episode 5"
+menunjuk episode yang SALAH.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 

@@ -80,8 +80,10 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.bytify.app.data.movie.EpisodeDto
 import com.bytify.app.data.movie.Movie
+import com.bytify.app.data.movie.MovieServerDto
 import com.bytify.app.data.movie.MovieSubtitleDto
 import com.bytify.app.data.movie.isJunkMediaUrl
+import com.bytify.app.data.movie.serverTambahan
 import com.bytify.app.ui.ModeFloating
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.components.VideoStage
@@ -160,7 +162,15 @@ private fun isEmbedStreamUrl(url: String): Boolean {
         lower.contains("filemoon") ||
         lower.contains("streamwish") ||
         lower.contains("vidhide") ||
-        lower.contains("dood")
+        lower.contains("dood") ||
+        // Penyedia berkunci TMDB id. vidcore.io/movie/<id> dan
+        // vidlink.pro/movie/<id> tidak memuat kata "embed" di URL-nya, jadi
+        // tanpa baris ini keduanya terbaca sebagai media langsung dan
+        // ExoPlayer mencoba memutar dokumen HTML sebelum jatuh ke embed.
+        lower.contains("vidcore") ||
+        lower.contains("vidlink") ||
+        lower.contains("vidsrc") ||
+        lower.contains("autoembed")
 }
 
 private val AD_DOMAINS = setOf(
@@ -357,6 +367,23 @@ private const val GATE_BYPASS_JS = """
   pantau();
   setInterval(buangLapisanGerbang, 800);
 
+  // Banyak penyedia embed menjawab HTTP 200 dengan halaman "tidak ada sumber"
+  // alih-alih galat. Tanpa deteksi ini server semacam itu baru dilewati setelah
+  // ambang waktu penuh habis; dengan deteksi ini pergantiannya seketika.
+  // Syaratnya KETAT — tidak ada <video> sama sekali DAN teks halamannya pendek
+  // — supaya halaman yang kebetulan memuat kalimat itu tidak ikut tertuduh.
+  function cekTakAdaSumber(){
+    try {
+      if (document.querySelector('video')) return;
+      var t = (document.body ? document.body.innerText : '') || '';
+      if (t.length > 2500) return;
+      if (/no server could play|no sources? found|no stream found|video not found|media not found|title not available/i.test(t)) {
+        console.log('BYTIFY_GAGAL');
+      }
+    } catch (e) {}
+  }
+  [4500, 10000, 15000].forEach(function(ms){ setTimeout(cekTakAdaSumber, ms); });
+
   // ---- Penampil subtitle ----
   // Cue dikirim dari aplikasi lewat postMessage karena dokumen ini lintas
   // origin: aplikasi mengambil berkas .srt dengan OkHttp (bebas CORS),
@@ -499,6 +526,31 @@ private val EMBED_CLEANUP_JS = """
 })();
 """.trimIndent()
 
+/**
+ * Satu server yang boleh dicoba pemutar, lengkap dengan Referer-nya.
+ *
+ * Referer ikut di sini — bukan satu nilai untuk seluruh film — karena
+ * syaratnya berbeda menurut ASAL server: embed LK21 menolak permintaan yang
+ * tidak membawa halaman filmnya dan mengalihkan ke beranda, sementara embed
+ * pihak ketiga berkunci TMDB id memakai alamatnya sendiri.
+ */
+private data class PilihanServer(
+    val nama: String,
+    val url: String,
+    val referer: String?,
+)
+
+/**
+ * Berapa lama satu server ditunggu sebelum dianggap gagal dan dilewati.
+ *
+ * Sengaja longgar: `ketukOtomatis()` melewati gerbang iklan dengan ketukan
+ * beruntun sampai sekitar 23 detik, jadi ambang yang terlalu rapat justru
+ * meninggalkan server yang sebetulnya sedang berhasil. Kegagalan yang bisa
+ * dikenali cepat (pengalihan keluar domain, atau halaman melaporkan tak punya
+ * sumber) tidak menunggu ambang ini.
+ */
+private const val BATAS_TUNGGU_MS = 18_000L
+
 private fun mediaMimeType(url: String): String? = when (Uri.parse(url).path.orEmpty().substringAfterLast('.', "").lowercase()) {
     "m3u8" -> MimeTypes.APPLICATION_M3U8
     "mp4", "m4v" -> MimeTypes.VIDEO_MP4
@@ -574,10 +626,61 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     var buffering by remember(playKey) { mutableStateOf(true) }
     var playbackError by remember(playKey) { mutableStateOf<String?>(null) }
     var useEmbedPlayer by remember(playKey, videoUrl) { mutableStateOf(isEmbedStreamUrl(videoUrl)) }
-    // Server player aktif. Berpindah server adalah cara situs sumber menyediakan
-    // resolusi lain, jadi pergantiannya dibuat seketika tanpa dialog apa pun.
-    val serverList = remember(movie.id) { movie.servers.filter { it.url.isNotBlank() } }
-    var activeEmbedUrl by remember(playKey, videoUrl) { mutableStateOf(videoUrl) }
+
+    // Server tambahan yang DITURUNKAN dari TMDB id judul ini. Tidak diterbitkan
+    // sebagai berkas: URL-nya deterministik dari satu bilangan yang sudah ada di
+    // tabel watch_aliases (lihat ServerTambahan.kt).
+    //
+    // Untuk serial, penomoran musimnya harus tidak ambigu. Penjaganya dipakai
+    // ULANG dari subtitle — masalahnya identik: katalog menomori semua episode
+    // sebagai musim 1, jadi untuk judul yang berbagi satu entri TMDB dengan
+    // musim lain, "musim 1 episode 5" menunjuk episode yang SALAH. Memutar
+    // episode yang salah lebih buruk daripada tidak punya server cadangan.
+    var serverEkstra by remember(playKey) { mutableStateOf<List<MovieServerDto>>(emptyList()) }
+    LaunchedEffect(playKey) {
+        val acuan = runCatching { app.container.ketersediaan.tmdbUntuk(movie.id) }.getOrNull()
+            ?: return@LaunchedEffect
+        val (tmdbId, tipe) = acuan
+        serverEkstra = if (tipe == "tv") {
+            val ep = episode ?: return@LaunchedEffect
+            val aman = runCatching {
+                app.container.ketersediaan.amanSubtitlePerEpisode(movie.id, tmdbId, tipe)
+            }.getOrDefault(false)
+            if (!aman) return@LaunchedEffect
+            serverTambahan(tmdbId, tipe, ep.season, ep.episode)
+        } else {
+            serverTambahan(tmdbId, "movie")
+        }
+    }
+
+    // Daftar server yang DITELUSURI pemutar, urut dari yang paling dipercaya.
+    // Server katalog lebih dulu karena URL-nya hasil panen dari halaman film
+    // yang nyata; server turunan menyusul sebagai cadangan.
+    //
+    // Refer­er-nya berbeda menurut ASAL server, bukan menurut domain: server
+    // katalog LK21 mensyaratkan halaman film sebagai Referer (tanpa itu embed
+    // mengalihkan ke beranda), sementara embed pihak ketiga memakai alamatnya
+    // sendiri — pola yang sama yang sudah terbukti pada katalog film Indonesia.
+    val kandidat = remember(movie.id, videoUrl, movie.servers, serverEkstra, movie.sourceUrl) {
+        val hasil = mutableListOf<PilihanServer>()
+        val terlihat = mutableSetOf<String>()
+        fun tambah(nama: String, url: String, referer: String?) {
+            if (url.isBlank() || !terlihat.add(url)) return
+            hasil += PilihanServer(nama.ifBlank { "server" }, url, referer)
+        }
+        tambah("utama", videoUrl, movie.sourceUrl)
+        movie.servers.forEach { tambah(it.server, it.url, movie.sourceUrl) }
+        serverEkstra.forEach { tambah(it.server, it.url, it.url) }
+        hasil
+    }
+
+    // Indeks server yang sedang dicoba. Berpindah server juga cara situs sumber
+    // menyediakan resolusi lain, jadi pergantian manual tetap seketika.
+    var indeksServer by remember(playKey, videoUrl) { mutableStateOf(0) }
+    var serverHabis by remember(playKey, videoUrl) { mutableStateOf(false) }
+    val serverAktif = kandidat.getOrNull(indeksServer)
+    val activeEmbedUrl = serverAktif?.url ?: videoUrl
+    val refererAktif = serverAktif?.referer ?: movie.sourceUrl
     // Subtitle aktif untuk mode embed. Null berarti mati.
     var activeSubUrl by remember(playKey) { mutableStateOf<String?>(null) }
     val nextEpisode = episode?.let { current -> movie.episodes.getOrNull(movie.episodes.indexOfFirst { it.id == current.id } + 1) }
@@ -612,6 +715,43 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     DisposableEffect(videoBerjalan) {
         if (videoBerjalan) ModeFloating.daftarkanVideo() else ModeFloating.lepaskanVideo()
         onDispose { ModeFloating.lepaskanVideo() }
+    }
+
+    // ---- Failover otomatis antar server embed ----
+    //
+    // Sebelum ini satu-satunya fallback adalah ExoPlayer -> embed. Kalau embed
+    // yang gagal, layar tinggal hitam dan pengguna harus menebak sendiri bahwa
+    // ada chip server lain yang perlu ditekan. Sekarang pemutar menelusuri
+    // [kandidat] sampai ada yang benar-benar berputar.
+    //
+    // Sinyal BERHASIL sudah ada sejak lama: halaman melaporkan BYTIFY_MAIN
+    // begitu <video> betul-betul berjalan. Yang ditambahkan sinyal GAGAL.
+    val majuServer: (String?) -> Unit = { dariUrl ->
+        // Laporan dari WebView yang sudah ditinggalkan diabaikan. Tanpa penjaga
+        // ini satu kegagalan basi bisa melompati server yang baru dipasang,
+        // dan daftar kandidat terkuras tanpa pernah dicoba sungguhan.
+        if (dariUrl == null || dariUrl == activeEmbedUrl) {
+            if (indeksServer + 1 < kandidat.size) indeksServer += 1 else serverHabis = true
+        }
+    }
+    // WebViewClient dibuat SEKALI per server, jadi lambda yang ditangkapnya
+    // membeku bersama nilai yang dibacanya — masalah yang sama dengan
+    // pointerInput di BottomBars.kt. Dibaca lewat State supaya selalu terkini.
+    val majuTerkini by rememberUpdatedState(majuServer)
+
+    LaunchedEffect(playKey, indeksServer, useEmbedPlayer, kandidat.size) {
+        if (!useEmbedPlayer || kandidat.isEmpty()) return@LaunchedEffect
+        // Server baru berarti belum berjalan. Tanpa reset ini, server yang
+        // sempat berhasil membuat watchdog bungkam untuk server penggantinya.
+        videoBerjalan = false
+        delay(BATAS_TUNGGU_MS)
+        if (!videoBerjalan) {
+            Log.w(
+                EMBED_TAG,
+                "server '${serverAktif?.nama}' tak berjalan dalam ${BATAS_TUNGGU_MS} ms; dilewati",
+            )
+            majuServer(activeEmbedUrl)
+        }
     }
     // Penandanya adalah NIAT memutar (playWhenReady), bukan isPlaying.
     // isPlaying berkedip mati-nyala setiap kali aliran menyangga — terbukti di
@@ -763,10 +903,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 EmbedVideoStage(
                     videoUrl = activeEmbedUrl,
                     fullscreen = true,
-                    referer = movie.sourceUrl,
+                    referer = refererAktif,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = {},
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onGagal = { majuTerkini(it) },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -789,10 +930,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 EmbedVideoStage(
                     videoUrl = activeEmbedUrl,
                     fullscreen = true,
-                    referer = movie.sourceUrl,
+                    referer = refererAktif,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, false) },
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onGagal = { majuTerkini(it) },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -831,10 +973,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 EmbedVideoStage(
                     videoUrl = activeEmbedUrl,
                     fullscreen = false,
-                    referer = movie.sourceUrl,
+                    referer = refererAktif,
                     subtitleUrl = activeSubUrl,
                     onToggleFullscreen = { toggleFullscreen(context, true) },
                     onMulaiBerjalan = { videoBerjalan = true },
+                    onGagal = { majuTerkini(it) },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -842,7 +985,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             VideoStage(exoPlayer, fullscreen = false, buffering = buffering, error = playbackError, onRetry = retry)
         }
 
-        if (useEmbedPlayer && serverList.size > 1) {
+        if (useEmbedPlayer && kandidat.size > 1) {
             Text(
                 "Kualitas / Server",
                 style = MaterialTheme.typography.labelLarge,
@@ -854,12 +997,17 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                serverList.forEach { pilihan ->
-                    val aktif = pilihan.url == activeEmbedUrl
+                kandidat.forEachIndexed { urutan, pilihan ->
+                    val aktif = urutan == indeksServer
                     FilterChip(
                         selected = aktif,
-                        onClick = { if (!aktif) activeEmbedUrl = pilihan.url },
-                        label = { Text(pilihan.server.uppercase().ifBlank { "SERVER" }) },
+                        onClick = {
+                            if (!aktif) {
+                                serverHabis = false
+                                indeksServer = urutan
+                            }
+                        },
+                        label = { Text(pilihan.nama.uppercase()) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = Color.Transparent,
                             labelColor = Color.LightGray,
@@ -869,6 +1017,22 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     )
                 }
             }
+            // Keterangan failover. Tanpa ini pergantian server otomatis terlihat
+            // seperti pemutar yang berkedip sendiri tanpa sebab yang jelas.
+            Text(
+                when {
+                    serverHabis ->
+                        "Seluruh ${kandidat.size} server sudah dicoba dan tidak ada yang berputar. " +
+                            "Ketuk salah satu chip untuk mencoba lagi."
+                    videoBerjalan -> "Server ${indeksServer + 1} dari ${kandidat.size} berjalan."
+                    else ->
+                        "Mencoba server ${indeksServer + 1} dari ${kandidat.size}. " +
+                            "Kalau tidak berputar, Bytify berpindah sendiri."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (serverHabis) Color(0xFFFF8A80) else Color.Gray,
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp),
+            )
         }
 
         if (useEmbedPlayer && subtitles.isNotEmpty()) {
@@ -966,12 +1130,25 @@ private fun EmbedVideoStage(
     subtitleUrl: String? = null,
     onMulaiBerjalan: () -> Unit = {},
     onWebView: (WebView) -> Unit = {},
+    /** Dipanggil dengan [videoUrl] bila server ini jelas tidak bisa dipakai. */
+    onGagal: (String) -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
     // Referer, lalu tahan navigasi yang keluar dari domain player.
     val sudahMain = remember(videoUrl) { AtomicBoolean(false) }
     var webRef by remember { mutableStateOf<WebView?>(null) }
+
+    // Apakah kegagalan pada [alamat] berarti SERVER INI yang gagal.
+    //
+    // Dua penjaga sekaligus. Pertama, alamatnya harus persis alamat server —
+    // halaman player memuat belasan permintaan lain (iklan, pelacak, font) dan
+    // yang gagal di antaranya tidak berarti apa-apa. Kedua, begitu film sudah
+    // berjalan laporan apa pun diabaikan: setelah video jalan, permintaan yang
+    // gagal tidak boleh membuat pemutar berpindah server dan memulai dari nol.
+    val gagalUrlIni: (String?) -> Boolean = { alamat ->
+        !sudahMain.get() && alamat != null && alamat.equals(videoUrl, ignoreCase = true)
+    }
 
     // Berkas subtitle diambil dengan OkHttp (tidak terkena CORS), diurai jadi
     // cue, lalu dikirim ke dokumen player lewat jembatan postMessage.
@@ -1026,6 +1203,15 @@ private fun EmbedVideoStage(
                                 sudahMain.set(true)
                                 onMulaiBerjalan()
                                 Log.i(EMBED_TAG, "film berjalan; ketukan otomatis dihentikan")
+                            } else if (pesan.contains("BYTIFY_GAGAL")) {
+                                // Halaman player sendiri melaporkan tak punya
+                                // sumber untuk judul ini. Tidak ada gunanya
+                                // menunggu ambang waktu: langsung ke server
+                                // berikutnya.
+                                if (!sudahMain.get()) {
+                                    Log.w(EMBED_TAG, "player melapor tanpa sumber: $videoUrl")
+                                    onGagal(videoUrl)
+                                }
                             } else {
                                 Log.i(EMBED_TAG, "konsol: $pesan")
                             }
@@ -1052,6 +1238,11 @@ private fun EmbedVideoStage(
                                 val target = baseDomainOf(reqUrl)
                                 if (target != null && target !in allowedDomains) {
                                     Log.w(EMBED_TAG, "navigasi frame utama ditahan: $target")
+                                    // Pengalihan keluar domain player = gerbang
+                                    // Referer gagal, atau judul ini tidak ada
+                                    // di penyedia tersebut. Dua-duanya berarti
+                                    // server ini tidak akan berputar.
+                                    if (!sudahMain.get()) onGagal(videoUrl)
                                     return true
                                 }
                             }
@@ -1112,6 +1303,15 @@ private fun EmbedVideoStage(
                                         val urlAkhir = balasan.request.url.toString()
                                         if (baseDomainOf(urlAkhir) != baseDomainOf(alamat)) {
                                             Log.w(EMBED_TAG, "player dialihkan ke $urlAkhir")
+                                            // Hanya dokumen player UTAMA yang
+                                            // menandakan server gagal; frame
+                                            // bersarang boleh dialihkan tanpa
+                                            // berarti apa-apa. shouldIntercept
+                                            // berjalan di utas latar, jadi
+                                            // laporannya dikirim lewat post().
+                                            if (reqUrl == videoUrl.lowercase() && !sudahMain.get()) {
+                                                view?.post { onGagal(videoUrl) }
+                                            }
                                             return@runCatching null
                                         }
                                         val tipe = balasan.header("Content-Type").orEmpty()
@@ -1163,6 +1363,14 @@ private fun EmbedVideoStage(
                                 "galat ${if (request?.isForMainFrame == true) "UTAMA" else "sub"}: " +
                                     "${request?.url} -> ${error?.description}",
                             )
+                            // Server embed hidup di dalam IFRAME, jadi domain
+                            // yang mati muncul sebagai galat sub-frame pada
+                            // alamat server — bukan pada frame utama. Jadi yang
+                            // dicocokkan URL-nya, bukan jenis framenya.
+                            // Terukur: player.autoembed.cc tidak resolve sama
+                            // sekali, dan tanpa jalur ini server seperti itu
+                            // baru dilewati setelah 18 detik penuh.
+                            if (gagalUrlIni(request?.url?.toString())) onGagal(videoUrl)
                         }
 
                         override fun onReceivedHttpError(
@@ -1172,6 +1380,9 @@ private fun EmbedVideoStage(
                         ) {
                             super.onReceivedHttpError(view, request, errorResponse)
                             Log.w(EMBED_TAG, "HTTP ${errorResponse?.statusCode} pada ${request?.url}")
+                            // Terukur: vidsrc.cc menjawab 522 (origin tumbang
+                            // di belakang Cloudflare) untuk 60 dari 60 judul.
+                            if (gagalUrlIni(request?.url?.toString())) onGagal(videoUrl)
                         }
                     }
                     // Alamat halaman film dimuat, lalu dicegat di atas dan dijawab

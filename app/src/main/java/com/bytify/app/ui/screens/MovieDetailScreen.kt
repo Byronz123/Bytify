@@ -1,12 +1,19 @@
 package com.bytify.app.ui.screens
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Movie
@@ -40,9 +48,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.bytify.app.data.movie.KetersediaanResmi
 import com.bytify.app.ui.LocalBottomInset
@@ -67,6 +79,102 @@ private val URUT_JENIS = listOf("flatrate", "free", "ads", "rent", "buy")
 
 /** Atribusi sumber katalog; dulu dikirim per film padahal nilainya seragam. */
 private const val LISENSI_BAWAAN = "LK21 Stream Adapter"
+
+/**
+ * Id video YouTube dari berbagai bentuk tautan trailer yang ada di katalog.
+ *
+ * Terukur pada catalog.json: dari 20.400 film bertrailer, 20.095 memakai
+ * `watch?v=`, 200 memakai `youtu.be/`, dan 105 bentuk youtube.com lain —
+ * seluruhnya YouTube, jadi satu pengurai sudah cukup.
+ *
+ * Mengembalikan null untuk bentuk yang tidak dikenali, supaya pemanggilnya
+ * bisa jatuh ke cara lama (membuka di aplikasi luar) alih-alih menyajikan
+ * pemutar kosong.
+ */
+private fun idYouTube(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+    val host = uri.host?.lowercase()?.removePrefix("www.") ?: return null
+    val id = when {
+        host == "youtu.be" -> uri.pathSegments.firstOrNull()
+        host.endsWith("youtube.com") -> when {
+            uri.path?.startsWith("/embed/") == true -> uri.pathSegments.getOrNull(1)
+            uri.path?.startsWith("/shorts/") == true -> uri.pathSegments.getOrNull(1)
+            else -> uri.getQueryParameter("v")
+        }
+        else -> null
+    }
+    // Id YouTube hanya huruf, angka, garis bawah, dan tanda hubung. Memeriksanya
+    // mencegah potongan jalur lain ikut tersisip ke URL embed.
+    return id?.takeIf { kandidat ->
+        kandidat.isNotBlank() && kandidat.all { it.isLetterOrDigit() || it == '_' || it == '-' }
+    }
+}
+
+/**
+ * Trailer diputar DI DALAM aplikasi lewat rute embed resmi YouTube.
+ *
+ * Dibuat terpisah dari `EmbedVideoStage` di pemutar film, dan itu disengaja:
+ * pemutar film membawa pelewat gerbang iklan, penyuntik subtitle, dan ketukan
+ * otomatis — semuanya tidak diperlukan di sini dan justru menambah risiko pada
+ * jalur yang sudah terbukti. YouTube cukup dimuat apa adanya.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun DialogTrailer(idVideo: String, judul: String, onTutup: () -> Unit) {
+    Dialog(
+        onDismissRequest = onTutup,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp).background(Color.Black)) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        keepScreenOn = true
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            // Tanpa ini autoplay ditahan sampai ada sentuhan,
+                            // dan trailer tampak macet di bingkai pertama.
+                            mediaPlaybackRequiresUserGesture = false
+                        }
+                        webChromeClient = WebChromeClient()
+                        webViewClient = WebViewClient()
+                        // YouTube menolak pemutar embed yang dimuat tanpa origin
+                        // yang sah. Terukur di perangkat: memuat /embed/<id>
+                        // sebagai alamat langsung memberi "Error 153 — terjadi
+                        // error pada konfigurasi pemutar video". Dokumen kecil
+                        // ini dimuat DENGAN base URL youtube.com, sehingga
+                        // iframe di dalamnya berjalan pada origin yang diterima.
+                        val halaman = """
+                            <!DOCTYPE html><html><head>
+                            <meta name="viewport" content="width=device-width,initial-scale=1">
+                            <style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
+                            iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style>
+                            </head><body><iframe
+                             src="https://www.youtube.com/embed/$idVideo?autoplay=1&playsinline=1&rel=0&modestbranding=1"
+                             allow="autoplay; encrypted-media; picture-in-picture"
+                             allowfullscreen></iframe></body></html>
+                        """.trimIndent()
+                        loadDataWithBaseURL("https://www.youtube.com", halaman, "text/html", "utf-8", null)
+                    }
+                },
+                onRelease = { web ->
+                    // about:blank dulu, baru destroy: tanpa itu suara trailer
+                    // bisa terus berbunyi setelah dialognya ditutup.
+                    web.stopLoading()
+                    web.loadUrl("about:blank")
+                    web.destroy()
+                },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            )
+            IconButton(onClick = onTutup, modifier = Modifier.align(Alignment.TopEnd)) {
+                Icon(Icons.Rounded.Close, contentDescription = "Tutup trailer $judul", tint = Color.White)
+            }
+        }
+    }
+}
 
 @Composable
 fun MovieDetailScreen(movieId: String) {
@@ -104,6 +212,11 @@ fun MovieDetailScreen(movieId: String) {
     LaunchedEffect(item.id) {
         resmi = runCatching { app.container.ketersediaan.ketersediaan(item.id) }.getOrNull()
     }
+
+    // Trailer diputar di dalam aplikasi; id-nya diurai sekali di sini supaya
+    // tombolnya tahu sejak awal apakah jalur embed bisa dipakai.
+    val idTrailer = remember(item.trailerUrl) { idYouTube(item.trailerUrl) }
+    var trailerDibuka by remember(item.id) { mutableStateOf(false) }
 
     val isFavorite = item.id in favoriteIds
     Column(
@@ -250,14 +363,27 @@ fun MovieDetailScreen(movieId: String) {
         item.trailerUrl?.let { trailer ->
             Button(
                 onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailer))) }
-                        .onFailure { app.toast("Tidak ada aplikasi untuk membuka trailer.") }
+                    if (idTrailer != null) {
+                        // Musik dijeda dulu, sama seperti saat film diputar:
+                        // dua sumber suara sekaligus tidak pernah diinginkan.
+                        app.container.player.pause()
+                        trailerDibuka = true
+                    } else {
+                        // Bentuk tautan yang tidak dikenali tetap bisa dibuka,
+                        // hanya saja lewat aplikasi luar seperti sebelumnya.
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailer))) }
+                            .onFailure { app.toast("Tidak ada aplikasi untuk membuka trailer.") }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 Icon(Icons.Rounded.Movie, null)
                 Text("  Tonton trailer")
             }
+        }
+
+        if (trailerDibuka && idTrailer != null) {
+            DialogTrailer(idTrailer, item.title) { trailerDibuka = false }
         }
 
         if (item.subtitles.isNotEmpty()) {

@@ -552,6 +552,69 @@ Untuk serial, server turunan memakai ULANG penjaga
 bernomor musim 1, jadi untuk judul yang berbagi entri TMDB, "musim 1 episode 5"
 menunjuk episode yang SALAH.
 
+**Aliran tidak bisa dipanen jadi URL, dan itu sudah diselidiki sampai tuntas.**
+Pertanyaannya wajar: kenapa tidak ambil saja m3u8-nya dari komponen pemutar,
+supaya hasilnya nyata? Diamati langsung pada vidlink:
+
+- jalur sumbernya `GET /api/b/movie/<token>` — **token terenkripsi** yang dibuat
+  JavaScript mereka, bukan TMDB id,
+- medianya dirakit `fu.wasm` (WebAssembly) lalu diserahkan ke pemutar sebagai
+  **`blob:`** lewat Media Source Extensions.
+
+`blob:` hanya hidup di dalam dokumen yang membuatnya — tidak bisa diserahkan ke
+ExoPlayer, tidak bisa diterbitkan ke katalog, tidak bisa diambil backend. Jadi
+tidak ada URL untuk dipanen, dan satu-satunya cara memutarnya adalah menjalankan
+halaman penyedianya. Jangan ulangi penyelidikan ini.
+
+**Server dimuat LANGSUNG, bukan di dalam iframe, kecuali kalau memang perlu.**
+Inilah sebab judul yang berputar di cinevo/123movies dulu gagal di APK:
+pembungkus iframe dipasang untuk SEMUA server, padahal ia hanya dibutuhkan embed
+LK21 (yang menolak permintaan tanpa halaman film sebagai Referer). Server pihak
+ketiga Referer-nya alamatnya sendiri, sehingga membungkusnya menciptakan keadaan
+yang tidak pernah terjadi di situs aslinya — pemutar berjalan di dalam frame.
+Terbukti di browser: vidlink memutar Inception dengan lancar sebagai halaman
+biasa. `langsung` di `EmbedVideoStage` memutuskannya, dan pada jalur itu
+`EMBED_CLEANUP_JS` TIDAK dijalankan — pembersih itu membuang elemen ber-class
+`overlay`/`popup`/`banner`, justru nama yang dipakai pemutar modern untuk
+kontrolnya sendiri.
+
+**Watchdog-nya dua ambang, karena dua kegagalan itu berlawanan.** Skrip
+melaporkan `BYTIFY_SIAP` begitu sumber menempel di elemen video, dan
+`BYTIFY_DIAM` kalau elemen videonya tidak pernah ada. Server tanpa sumber
+dibuang di ~9 detik; server yang sudah menempelkan sumber ditunggu sampai
+`BATAS_SABAR_MS` (45 detik) karena justru itu satu-satunya yang akan memutar.
+Terukur di perangkat: menjangkau server ke-4 turun dari 54+ detik menjadi
+**22 detik**.
+
+Satu jebakan yang sudah memakan waktu: `GATE_BYPASS_JS` disuntikkan ke SETIAP
+dokumen termasuk frame bersarang, jadi tiap frame punya penandanya sendiri.
+Frame dalam melaporkan SIAP, lalu frame LUAR (yang memang tak pernah memuat
+video) melaporkan DIAM, dan server yang sudah dapat sumber ikut dibuang.
+Karena itu DIAM diabaikan setelah SIAP — bukti positif mengalahkan ketiadaan
+bukti. Penandanya ada di Kotlin (`sudahSiap`), bukan di dalam skrip.
+
+### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
+
+Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar
+keluar. Sekarang diputar di dialog ber-WebView. Dari 25.186 film, 20.400 punya
+trailer dan SEMUANYA YouTube (20.095 `watch?v=`, 200 `youtu.be/`, 105 bentuk
+youtube.com lain), jadi satu pengurai `idYouTube()` cukup; bentuk yang tidak
+dikenali tetap jatuh ke aplikasi luar.
+
+**Memuat `youtube.com/embed/<id>` sebagai alamat langsung TIDAK bekerja** —
+terukur di perangkat, hasilnya "Error 153: terjadi error pada konfigurasi
+pemutar video", karena halaman pemuatnya tidak punya origin yang sah. Yang
+dipakai dokumen pembungkus kecil yang dimuat dengan `loadDataWithBaseURL` ber-
+base `https://www.youtube.com`, sehingga iframe di dalamnya berjalan pada origin
+yang diterima. Catatan 3n soal `loadDataWithBaseURL` tidak berlaku di sini:
+yang dibutuhkan YouTube origin, bukan header Referer.
+
+Pemutarnya sengaja TERPISAH dari `EmbedVideoStage`: pelewat gerbang iklan,
+penyuntik subtitle, dan ketukan otomatis tidak diperlukan untuk YouTube dan
+hanya menambah risiko pada jalur yang sudah terbukti. `onRelease` memuat
+`about:blank` SEBELUM `destroy()`, tanpa itu suara trailer terus berbunyi
+setelah dialognya ditutup.
+
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 
 - `sourceUrl` dipakai sebagai **Referer**; tanpa ini embed mengalihkan ke beranda.

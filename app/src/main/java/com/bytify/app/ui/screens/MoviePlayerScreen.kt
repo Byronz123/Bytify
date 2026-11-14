@@ -384,6 +384,44 @@ private const val GATE_BYPASS_JS = """
   }
   [4500, 10000, 15000].forEach(function(ms){ setTimeout(cekTakAdaSumber, ms); });
 
+  // ---- Deteksi KEMAJUAN, bukan sekadar "sudah berputar" ----
+  //
+  // Terukur pada penyedia sungguhan: vidlink merakit alirannya lewat
+  // WebAssembly lalu menyerahkannya ke player sebagai blob: melalui Media
+  // Source Extensions. Tidak pernah ada URL m3u8 atau mp4 yang bisa diamati
+  // dari luar — jadi satu-satunya yang bisa dipantau keadaan elemen <video>
+  // itu sendiri.
+  //
+  // Gunanya membedakan dua hal yang dulu sama-sama "belum berputar":
+  //   SIAP = sumber sudah menempel / data mulai masuk -> server ini BEKERJA,
+  //          beri waktu lebih daripada membuangnya saat ambang biasa lewat.
+  //   DIAM = tidak ada <video> sama sekali -> tidak ada gunanya menunggu.
+  var sudahSiap = false;
+  function pantauKemajuan(){
+    try {
+      var v = cariVideo();
+      if (v && !sudahSiap) {
+        var adaSumber = !!(v.src || v.currentSrc || v.srcObject);
+        var adaData = (v.readyState >= 2) ||
+                      (v.buffered && v.buffered.length > 0);
+        if (adaSumber || adaData) {
+          sudahSiap = true;
+          console.log('BYTIFY_SIAP rs=' + v.readyState);
+        }
+      }
+    } catch (e) {}
+    setTimeout(pantauKemajuan, 500);
+  }
+  pantauKemajuan();
+
+  // Server yang bahkan belum membuat elemen <video> setelah sekian detik tidak
+  // sedang menyangga apa pun — ia memang tidak punya sumber. Terukur: vidcore
+  // berhenti di "FETCHING YOUR CONTENT..." lebih dari 20 detik untuk judul yang
+  // vidlink putar dengan lancar.
+  setTimeout(function(){
+    try { if (!sudahSiap && !cariVideo()) console.log('BYTIFY_DIAM'); } catch (e) {}
+  }, 9000);
+
   // ---- Penampil subtitle ----
   // Cue dikirim dari aplikasi lewat postMessage karena dokumen ini lintas
   // origin: aplikasi mengambil berkas .srt dengan OkHttp (bebas CORS),
@@ -551,6 +589,18 @@ private data class PilihanServer(
  */
 private const val BATAS_TUNGGU_MS = 18_000L
 
+/**
+ * Ambang yang dipakai begitu server melaporkan sumbernya sudah menempel
+ * (`BYTIFY_SIAP`).
+ *
+ * Membedakan keduanya penting karena dua kegagalan yang dulu terlihat sama
+ * sebetulnya berlawanan: server yang tidak punya sumber sama sekali harus
+ * ditinggalkan secepatnya, sedangkan server yang sudah menempelkan sumber dan
+ * sedang menyangga justru paling rugi kalau dibuang — itu satu-satunya yang
+ * benar-benar akan memutar film.
+ */
+private const val BATAS_SABAR_MS = 45_000L
+
 private fun mediaMimeType(url: String): String? = when (Uri.parse(url).path.orEmpty().substringAfterLast('.', "").lowercase()) {
     "m3u8" -> MimeTypes.APPLICATION_M3U8
     "mp4", "m4v" -> MimeTypes.VIDEO_MP4
@@ -678,6 +728,9 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // menyediakan resolusi lain, jadi pergantian manual tetap seketika.
     var indeksServer by remember(playKey, videoUrl) { mutableStateOf(0) }
     var serverHabis by remember(playKey, videoUrl) { mutableStateOf(false) }
+    // Server yang sudah menempelkan sumber ke elemen video. Dipakai watchdog
+    // untuk memilih ambang sabar alih-alih ambang biasa.
+    var serverSiap by remember(playKey, videoUrl) { mutableStateOf(false) }
     val serverAktif = kandidat.getOrNull(indeksServer)
     val activeEmbedUrl = serverAktif?.url ?: videoUrl
     val refererAktif = serverAktif?.referer ?: movie.sourceUrl
@@ -741,16 +794,31 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
 
     LaunchedEffect(playKey, indeksServer, useEmbedPlayer, kandidat.size) {
         if (!useEmbedPlayer || kandidat.isEmpty()) return@LaunchedEffect
-        // Server baru berarti belum berjalan. Tanpa reset ini, server yang
-        // sempat berhasil membuat watchdog bungkam untuk server penggantinya.
+        // Server baru berarti belum berjalan dan belum siap. Tanpa reset ini,
+        // server yang sempat berhasil membuat watchdog bungkam untuk server
+        // penggantinya.
         videoBerjalan = false
-        delay(BATAS_TUNGGU_MS)
-        if (!videoBerjalan) {
-            Log.w(
-                EMBED_TAG,
-                "server '${serverAktif?.nama}' tak berjalan dalam ${BATAS_TUNGGU_MS} ms; dilewati",
-            )
-            majuServer(activeEmbedUrl)
+        serverSiap = false
+
+        // Ambangnya dibaca ULANG tiap putaran, bukan ditetapkan di awal:
+        // sebuah server bisa melaporkan sumbernya menempel di detik ke-15, dan
+        // sejak saat itu ia pantas ditunggu sampai BATAS_SABAR_MS, bukan
+        // dibuang karena keputusan yang diambil sebelum laporannya datang.
+        val mulai = System.currentTimeMillis()
+        while (!videoBerjalan) {
+            delay(500)
+            if (videoBerjalan) break
+            val lewat = System.currentTimeMillis() - mulai
+            val batas = if (serverSiap) BATAS_SABAR_MS else BATAS_TUNGGU_MS
+            if (lewat >= batas) {
+                Log.w(
+                    EMBED_TAG,
+                    "server '${serverAktif?.nama}' tak berjalan dalam $lewat ms " +
+                        "(siap=$serverSiap, ambang=$batas); dilewati",
+                )
+                majuServer(activeEmbedUrl)
+                break
+            }
         }
     }
     // Penandanya adalah NIAT memutar (playWhenReady), bukan isPlaying.
@@ -908,6 +976,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onToggleFullscreen = {},
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
+                    onSiap = { serverSiap = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -935,6 +1004,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onToggleFullscreen = { toggleFullscreen(context, false) },
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
+                    onSiap = { serverSiap = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -978,6 +1048,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onToggleFullscreen = { toggleFullscreen(context, true) },
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
+                    onSiap = { serverSiap = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1025,6 +1096,9 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                         "Seluruh ${kandidat.size} server sudah dicoba dan tidak ada yang berputar. " +
                             "Ketuk salah satu chip untuk mencoba lagi."
                     videoBerjalan -> "Server ${indeksServer + 1} dari ${kandidat.size} berjalan."
+                    serverSiap ->
+                        "Server ${indeksServer + 1} dari ${kandidat.size} sudah dapat sumbernya, " +
+                            "sedang menyiapkan video."
                     else ->
                         "Mencoba server ${indeksServer + 1} dari ${kandidat.size}. " +
                             "Kalau tidak berputar, Bytify berpindah sendiri."
@@ -1132,11 +1206,24 @@ private fun EmbedVideoStage(
     onWebView: (WebView) -> Unit = {},
     /** Dipanggil dengan [videoUrl] bila server ini jelas tidak bisa dipakai. */
     onGagal: (String) -> Unit = {},
+    /** Sumber sudah menempel di elemen video; server ini layak ditunggu. */
+    onSiap: () -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
     // Referer, lalu tahan navigasi yang keluar dari domain player.
     val sudahMain = remember(videoUrl) { AtomicBoolean(false) }
+
+    // Apakah ADA frame yang sudah melaporkan sumbernya menempel.
+    //
+    // Perlu dilacak di sini, bukan di dalam skrip, karena GATE_BYPASS_JS
+    // disuntikkan ke SETIAP dokumen termasuk frame bersarang — jadi tiap frame
+    // punya penanda sendiri. Terukur di perangkat: frame dalam melaporkan
+    // BYTIFY_SIAP, lalu empat detik kemudian frame LUAR (yang memang tidak
+    // pernah memuat video) melaporkan BYTIFY_DIAM dan server yang sebetulnya
+    // sudah dapat sumber ikut dibuang. Bukti positif mengalahkan ketiadaan
+    // bukti, jadi DIAM diabaikan setelah SIAP.
+    val sudahSiap = remember(videoUrl) { AtomicBoolean(false) }
     var webRef by remember { mutableStateOf<WebView?>(null) }
 
     // Apakah kegagalan pada [alamat] berarti SERVER INI yang gagal.
@@ -1172,11 +1259,35 @@ private fun EmbedVideoStage(
             }
         }
         Log.i(EMBED_TAG, "kirim subtitle (${cue.length} bait json)")
-        web.evaluateJavascript("window.bytifyKirimSub && window.bytifyKirimSub($cue);", null)
+        // Jembatan bytifyKirimSub hanya ada di pembungkus iframe. Tanpa
+        // pembungkus (jalur langsung), cue dikirim ke dokumennya sendiri —
+        // penampil subtitle di GATE_BYPASS_JS mendengarkan pesan yang sama
+        // dan meneruskannya ke frame anak.
+        web.evaluateJavascript(
+            "(window.bytifyKirimSub ? window.bytifyKirimSub($cue) " +
+                ": window.postMessage({bytifySub: $cue}, '*'));",
+            null,
+        )
     }
     val allowedDomains = remember(videoUrl, referer) {
         setOfNotNull(baseDomainOf(videoUrl), referer?.let(::baseDomainOf))
     }
+
+    /**
+     * Apakah server ini dimuat sebagai HALAMAN UTAMA, bukan di dalam iframe.
+     *
+     * Pembungkus iframe ada untuk satu alasan: embed LK21 menolak permintaan
+     * yang tidak membawa halaman filmnya sebagai Referer. Server pihak ketiga
+     * berkunci TMDB id tidak punya syarat itu — Referer-nya alamatnya sendiri —
+     * sehingga membungkusnya justru membuat keadaan yang TIDAK pernah terjadi
+     * di situs aslinya: pemutar berjalan di dalam frame.
+     *
+     * Itu yang membuat judul yang berputar di cinevo/123movies gagal di sini.
+     * Terbukti di browser: vidlink memutar Inception dengan lancar ketika
+     * dibuka sebagai halaman biasa. Jadi untuk server seperti itu alamatnya
+     * dimuat apa adanya, persis seperti yang dilakukan situs asalnya.
+     */
+    val langsung = referer.isNullOrBlank() || referer.equals(videoUrl, ignoreCase = true)
     val boxMod = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
 
     Box(boxMod.background(Color.Black)) {
@@ -1203,6 +1314,18 @@ private fun EmbedVideoStage(
                                 sudahMain.set(true)
                                 onMulaiBerjalan()
                                 Log.i(EMBED_TAG, "film berjalan; ketukan otomatis dihentikan")
+                            } else if (pesan.contains("BYTIFY_SIAP")) {
+                                // Sumber sudah menempel di elemen video. Server
+                                // ini bekerja walau filmnya belum bergerak,
+                                // jadi pemutar menunggunya lebih lama.
+                                Log.i(EMBED_TAG, "server menyiapkan sumber: $pesan")
+                                sudahSiap.set(true)
+                                onSiap()
+                            } else if (pesan.contains("BYTIFY_DIAM")) {
+                                if (!sudahMain.get() && !sudahSiap.get()) {
+                                    Log.w(EMBED_TAG, "tidak ada elemen video sama sekali: $videoUrl")
+                                    onGagal(videoUrl)
+                                }
                             } else if (pesan.contains("BYTIFY_GAGAL")) {
                                 // Halaman player sendiri melaporkan tak punya
                                 // sumber untuk judul ini. Tidak ada gunanya
@@ -1261,7 +1384,12 @@ private fun EmbedVideoStage(
                             // di dalamnya mengirim Referer yang sah ke player.
                             // loadDataWithBaseURL tidak bisa dipakai di sini: dokumen
                             // hasil data: tidak mengirim Referer sama sekali.
-                            if (request?.isForMainFrame == true && !referer.isNullOrBlank() &&
+                            //
+                            // Hanya untuk server yang MEMBUTUHKANNYA. Server pihak
+                            // ketiga dimuat apa adanya sebagai halaman utama — lihat
+                            // [langsung]; membungkusnya justru yang membuat judul
+                            // yang berputar di situs asalnya gagal di sini.
+                            if (!langsung && request?.isForMainFrame == true && !referer.isNullOrBlank() &&
                                 reqUrl == referer.lowercase()
                             ) {
                                 return WebResourceResponse(
@@ -1348,7 +1476,13 @@ private fun EmbedVideoStage(
                             super.onPageFinished(view, url)
                             view?.let(onWebView)
                             Log.i(EMBED_TAG, "selesai memuat: $url")
-                            view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
+                            // Pembersih iklan hanya untuk halaman bergerbang iklan
+                            // (LK21). Ia membuang elemen ber-class "overlay",
+                            // "popup", dan "banner" — justru nama yang dipakai
+                            // pemutar modern untuk KONTROLNYA SENDIRI, sehingga
+                            // menjalankannya di sana merusak pemutar yang
+                            // sebetulnya sehat.
+                            if (!langsung) view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
                             view?.let { ketukOtomatis(it, sudahMain) }
                         }
 

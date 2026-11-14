@@ -30,6 +30,8 @@ backend/data/tmdb_match_worklist.json
 backend/data/anime_tmdb_source.json
 backend/data/anime_tmdb_source.json.*tmp
 backend/data/anime_tmdb_worklist.json
+backend/data/anime_titles.json
+backend/data/anime_titles.json.*tmp
 backend/data/anime_tmdb_map.json
 backend/data/anime_tmdb_map.json.*
 backend/data/watch_database.json.*tmp

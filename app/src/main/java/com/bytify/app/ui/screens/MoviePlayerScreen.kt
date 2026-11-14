@@ -531,7 +531,37 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         }
     }
     val videoUrl = episode?.videoUrl ?: movie.videoUrl.orEmpty()
-    val subtitles = episode?.subtitles?.takeIf { it.isNotEmpty() } ?: if (episode == null) movie.subtitles else emptyList()
+    val subtitlesKatalog = episode?.subtitles?.takeIf { it.isNotEmpty() }
+        ?: if (episode == null) movie.subtitles else emptyList()
+
+    // Subtitle tambahan dari OpenSubtitles, lewat proxy backend (kunci API ada
+    // di server, tidak di APK). Hasilnya ditambahkan ke daftar yang SAMA, jadi
+    // seluruh jalur di bawah ini tidak berubah sama sekali: konfigurasi
+    // ExoPlayer, pipa cue embed lewat postMessage, dan menu pemilih.
+    //
+    // URL-nya menunjuk ke /api/subtitles/file?fileId=..., yang baru mengalihkan
+    // ke tautan OpenSubtitles saat benar-benar diunduh — jadi kuota tidak
+    // terpakai hanya karena daftarnya tampil.
+    //
+    // Gagal berarti daftar kosong: subtitle itu tambahan, dan pemutaran tidak
+    // boleh ikut gagal karenanya.
+    var subtitlesJaring by remember(playKey) { mutableStateOf<List<MovieSubtitleDto>>(emptyList()) }
+    LaunchedEffect(playKey) {
+        val acuan = runCatching { app.container.ketersediaan.tmdbUntuk(movie.id) }.getOrNull()
+            ?: return@LaunchedEffect
+        subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
+            tmdbId = acuan.first,
+            type = if (episode != null && acuan.second == "tv") "episode" else "movie",
+            season = episode?.season,
+            episode = episode?.episode,
+        )
+    }
+    // Subtitle dari katalog diutamakan; yang dari jaringan hanya menambah
+    // bahasa yang belum ada, supaya tidak ada dua entri untuk bahasa sama.
+    val subtitles = remember(subtitlesKatalog, subtitlesJaring) {
+        val sudahAda = subtitlesKatalog.map { it.lang.lowercase() }.toSet()
+        subtitlesKatalog + subtitlesJaring.filterNot { it.lang.lowercase() in sudahAda }
+    }
     var buffering by remember(playKey) { mutableStateOf(true) }
     var playbackError by remember(playKey) { mutableStateOf<String?>(null) }
     var useEmbedPlayer by remember(playKey, videoUrl) { mutableStateOf(isEmbedStreamUrl(videoUrl)) }

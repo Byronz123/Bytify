@@ -254,3 +254,77 @@ data class LiveFavoriteEntity(
     @PrimaryKey val channelId: String,
     val savedAt: Long,
 )
+
+/**
+ * Ketersediaan RESMI satu judul di Indonesia (data JustWatch lewat TMDB).
+ *
+ * Tabel ini SENGAJA berdiri sendiri, bukan kolom baru di [MovieEntity]. Dua
+ * alasannya:
+ *
+ * 1. Isinya bukan sesuatu yang bisa diputar di dalam aplikasi — ia menunjuk ke
+ *    layanan sah dan dibuka di luar lewat intent. Menaruhnya di `movies` akan
+ *    membuat pemutar menyangka ada yang bisa dimuat.
+ * 2. `movies` dibaca utuh ke memori oleh StateFlow daftar besar. Menambah
+ *    puluhan ribu baris lagi ke sana adalah jalan yang sudah pernah
+ *    mematikan aplikasi dengan OutOfMemoryError di Galaxy A36.
+ *
+ * Penjodohannya lewat [tmdbId], yang diturunkan dari id film ("tmdb-<id>"),
+ * jadi film Indonesia yang sudah ada di katalog pun ikut dapat chip-nya tanpa
+ * perlu kolom baru di `movies`.
+ */
+@Entity(
+    tableName = "watch_titles",
+    indices = [Index(value = ["tmdbId"]), Index(value = ["type"])],
+)
+data class WatchTitleEntity(
+    @PrimaryKey val id: String,
+    /** Kunci penjodohan dengan katalog film yang sudah ada. */
+    val tmdbId: Int,
+    /** "movie" atau "tv"; TMDB memakai ruang id terpisah untuk keduanya. */
+    val type: String,
+    val title: String,
+    val posterUrl: String?,
+    val year: Int?,
+    val overview: String,
+    val genresJson: String,
+    val rating: Double?,
+    val runtimeMin: Int?,
+    /**
+     * Peta jenis langganan -> daftar id penyedia, misalnya
+     * `{"flatrate":[8,159],"rent":[2]}`. Disimpan sebagai JSON karena jumlah
+     * jenisnya tetap kecil dan hanya dibaca di halaman detail.
+     */
+    val watchJson: String,
+    /** Tautan resmi halaman tonton; dibuka di luar aplikasi. */
+    val watchLink: String?,
+    val updatedAt: Long,
+)
+
+/** Kamus penyedia sah: id -> nama & logo, agar namanya tidak diulang per judul. */
+@Entity(tableName = "watch_providers")
+data class WatchProviderEntity(
+    @PrimaryKey val providerId: Int,
+    val name: String,
+    val logoPath: String?,
+    /** Urutan tampil dari TMDB; makin kecil makin diutamakan. */
+    val priority: Int?,
+)
+
+/**
+ * Jembatan id katalog -> TMDB id, hasil pencocokan KETAT di tmdb_match.py.
+ *
+ * Perlu karena 25.186 film LK21 memakai id siput tanpa TMDB id, sementara
+ * lapisan ketersediaan dan subtitle keduanya dikunci TMDB id. Tanpa jembatan
+ * ini, keduanya tidak pernah menjangkau katalog utama.
+ *
+ * Hanya kecocokan yang judul ternormalkannya SAMA PERSIS dan tahunnya cocok
+ * (±1) yang masuk ke sini; yang ambigu sengaja tidak dipetakan, karena salah
+ * pasang lebih buruk daripada tidak pasang.
+ */
+@Entity(tableName = "watch_aliases")
+data class WatchAliasEntity(
+    @PrimaryKey val movieId: String,
+    val tmdbId: Int,
+    val type: String,
+)
+

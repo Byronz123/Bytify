@@ -16,6 +16,9 @@ on:
     paths:
       - backend/data/catalog.json
       - backend/data/series_catalog.json
+      - backend/data/indonesia_catalog.json
+      - backend/data/anime_catalog.json
+      - backend/data/watch_catalog.json
       - backend/data/live_tv_database.json
       - backend/api/**
       - functions/**

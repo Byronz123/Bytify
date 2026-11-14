@@ -19,8 +19,10 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
 | Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH |
+| Anime | 13.094 | 87.430 episode (cap 12/judul); embed framextv, berkas TERPISAH |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
+| Ketersediaan resmi | lihat 3e | judul + layanan sah di Indonesia; TANPA URL stream |
 | Podcast teratas | 100 | batas Apple RSS |
 | Stasiun radio | 500 | per kueri, per negara; lintas dunia |
 
@@ -45,7 +47,20 @@ backend/scraper/series_scraper.py        penjelajah + pemanen SERIAL. Serial TID
                                        struktur kategori yang sama. Tanpa Selenium.
                                        Mode "segarkan" dipakai daemon.
 backend/scraper/build_series_catalog.py  series_database.json -> series_catalog.json
+backend/scraper/anilist_anime.py       pemanen metadata+AniList id dari API
+                                       GraphQL AniList; dipecah per tahun
+backend/scraper/build_anime_catalog.py   anime_database.json -> anime_catalog.json;
+                                       embed framextv per AniList id
 backend/scraper/series_links.txt         5.143 URL serial hasil sapuan
+backend/scraper/tmdb_watch.py          pemanen KETERSEDIAAN RESMI per judul dari
+                                       TMDB (data JustWatch), wilayah ID; satu
+                                       permintaan sekalian membawa runtime, imdb_id,
+                                       dan genre ASLI. Bisa dilanjutkan.
+backend/scraper/build_watch_catalog.py   watch_database.json -> watch_catalog.json
+backend/scraper/tmdb_match.py          judul katalog LK21 -> TMDB id, KETAT:
+                                       judul ternormalkan sama persis + tahun ±1,
+                                       yang ambigu dilewati. Bisa dilanjutkan.
+backend/api/src/subtitles.mjs          proxy OpenSubtitles; kunci hanya di server
 backend/scraper/fetch_subtitles.py     OpenSubtitles + TMDB -> backend/data/subtitles/
 backend/scraper/auto_sync_daemon.py    crawl -> build -> Live TV -> commit & push
 backend/scraper/update_bytify.bat      pembungkus daemon; menyetel PYTHONIOENCODING
@@ -63,6 +78,8 @@ backend/data/catalog.json              yang diunduh APK: 23,26 MiB
 backend/data/series_database.json      hasil panen serial, 4.919 entri (17,8 MB);
                                        TIDAK dilacak git
 backend/data/series_catalog.json       yang diunduh APK: 12,71 MiB
+backend/data/watch_database.json       hasil panen ketersediaan; TIDAK dilacak git
+backend/data/watch_catalog.json        yang diunduh APK: lapisan ketersediaan resmi
 backend/data/live_tv_database.json     katalog kanal: 1,99 MiB
 
 backend/api/                           API Node (server.mjs, src/movies.mjs, src/live.mjs)
@@ -79,7 +96,8 @@ app/src/main/java/com/bytify/app/
   data/live/LiveRepository.kt          kanal Live TV (flowOn Default)
   data/live/LiveCatalogApi.kt          pengunduh kanal (decodeFromStream)
   data/remote/ChartsRepository.kt      tangga lagu & album Apple RSS, TTL 3 jam
-  data/db/BytifyDatabase.kt            Room v10, MIGRATION_8_9 & 9_10
+  data/movie/WatchRepository.kt         ketersediaan resmi; akses BERTITIK, tanpa Flow penuh
+  data/db/BytifyDatabase.kt            Room v11, MIGRATION_8_9, 9_10 & 10_11
   ui/screens/MoviePlayerScreen.kt      WebView, bypass gerbang iklan, subtitle
   ui/screens/HomeScreen.kt             mix personal acak, album, grid 2 baris
   ui/components/BottomBars.kt          navigasi indeks pecahan mengikuti jari
@@ -91,6 +109,7 @@ Katalog di-host di Cloudflare Pages:
 - film `https://bytify-api.pages.dev/api/catalog.json`
 - serial `https://bytify-api.pages.dev/api/series.json`
 - live TV `https://bytify-api.pages.dev/api/live/channels.json`
+- ketersediaan resmi `https://bytify-api.pages.dev/api/watch.json`
 
 ---
 
@@ -136,6 +155,40 @@ Sinopsis serial TIDAK dipotong. Pemotongan pada film aman karena dilengkapi
 memakai siput situsnya sendiri. Server alternatif per episode dibuang — pemutar
 memakai `episode.videoUrl` dengan `movie.sourceUrl` sebagai Referer.
 
+### 3d. Film Indonesia & anime: dua berkas tambahan lagi, embed framextv
+
+Selain serial, ada dua katalog tambahan yang terbit sebagai berkas sendiri dan
+masuk ke tabel `movies` yang sama lewat `MovieRepository.refreshIfStale()`:
+
+- **Film Indonesia** — `tmdb_indonesia.py` memanen dari TMDB
+  (`discover?with_origin_country=ID`), `build_indonesia_catalog.py` membangun
+  `indonesia_catalog.json` -> `/api/indonesia.json`. Server pemutarnya embed
+  framextv berkunci **TMDB id**. 24 film yang tumpang tindih dengan LK21
+  digabung di bawah id lk21- dengan kedua set server.
+- **Anime** — `anilist_anime.py` memanen metadata + **AniList id** dari API
+  GraphQL AniList (publik, gratis, tanpa kunci; dipecah per tahun karena satu
+  kueri hanya memulangkan 5.000). `build_anime_catalog.py` membangun
+  `anime_catalog.json` -> `/api/anime.json`. Server pemutarnya rute embed yang
+  DIPUBLIKASIKAN framextv: `/embed/anime/<anilistId>` dan
+  `/embed/anime/<anilistId>/<episode>`.
+
+`MovieCatalogApi` memakai satu helper `ambilKatalogTambahan(berkas)` untuk
+ketiganya (serial, indonesia, anime): URL diturunkan dari URL katalog film,
+diurai dari ALIRAN DATA, mengembalikan null bila berkasnya belum ada.
+
+**Anime WAJIB dijaga ukurannya dua arah.** 13.094 judul x semua episode =
+32 MiB, lewat batas keras 25 MiB. Dua pemotongan di `build_anime_catalog.py`
+membuatnya muat (22,68 MiB):
+- `BATAS_EPISODE = 12` — episode disimpan per judul dibatasi. URL deterministik,
+  jadi ini hanya memotong daftar yang tampil, bukan merusak pemutaran.
+- `PANJANG_SINOPSIS = 400` — sinopsis dipotong. BERBEDA dari serial: anime
+  memakai id "anilist-", yang TIDAK punya jalur `enrichIfNeeded` (itu hanya
+  untuk id "lk21-"), jadi pemotongan ini PERMANEN. Batas 25 MiB tidak bisa
+  ditawar, jadi ini konsekuensi yang diterima.
+
+Penjagaan ukuran + "setiap judul harus punya episode" + "tidak ada id ganda"
+ada di `build-pages.test.mjs` supaya ketahuan di CI, bukan saat deploy.
+
 ### 3c. Keempat layar tab ditahan hidup; NavHost tidak lagi memuatnya
 
 NavHost membongkar lalu membangun ulang tujuannya setiap kali tab ditekan.
@@ -152,6 +205,121 @@ sentuh. Percobaan pertama memakai pointerInput yang menelan sentuhan, dan itu
 MEMATIKAN seluruh tombol navigasi bawah.
 
 Hasil: pindah tab 85-101 ms -> 32-42 ms, jank 15-30% -> 6,9-11,2%.
+
+### 3e. Lapisan KETERSEDIAAN RESMI berdiri sendiri, dan tidak boleh bisa diputar
+
+`/api/watch.json` menjawab satu pertanyaan: judul ini bisa ditonton **resmi** di
+layanan apa saja di Indonesia. Sumbernya TMDB `watch/providers` (data JustWatch),
+jadi isinya nama layanan + tautan resmi — **tidak ada URL stream sama sekali**.
+
+Tiga hal yang mengikat bentuknya, jangan dibatalkan tanpa alasan:
+
+- **Bentuknya `titles` + kamus `providers`, bukan `movies`.** Mengulang nama
+  seperti "Amazon Prime Video" di puluhan ribu entri jauh lebih mahal daripada
+  satu kamus 46 baris. Kamus juga dipangkas ke penyedia yang betul-betul dirujuk.
+- **Tabel Room-nya SENDIRI (`watch_titles` + `watch_providers`), bukan kolom baru
+  di `movies`.** `movies` dibaca utuh ke memori oleh StateFlow daftar besar;
+  menambah puluhan ribu baris lagi ke sana adalah jalan yang sudah pernah
+  mematikan aplikasi dengan OutOfMemoryError di Galaxy A36. `WatchRepository`
+  karena itu TIDAK punya Flow daftar penuh — hanya akses bertitik (satu judul)
+  dan kueri berbatas `LIMIT`.
+- **Penjodohannya menurunkan TMDB id dari id film** ("tmdb-<id>" untuk film
+  Indonesia, "tmdb-movie-<id>"/"tmdb-tv-<id>" untuk lapisan ini), pola yang sama
+  dengan `pemilikEpisode()`. Jadi tidak ada kolom baru di `movies`.
+
+`build-pages.test.mjs` menjaga: ukuran < 24 MiB, setiap judul punya minimal satu
+penyedia, setiap id penyedia ada di kamus (integritas rujukan), id tidak ganda,
+atribusi ikut terbit, dan — yang khas lapisan ini — **tidak ada videoUrl,
+servers, atau streamUrl**. Kalau suatu saat ada yang menyelipkan URL pemutaran
+ke sini, uji itu gagal di CI.
+
+Atribusi "Data ketersediaan dari JustWatch melalui TMDB" WAJIB tampil; teksnya
+ikut di berkas dan juga ada sebagai konstanta `ATRIBUSI_KETERSEDIAAN` supaya
+tetap muncul walau berkasnya belum pernah terunduh.
+
+### 3f. Himpunan judul luar: pakai tmdbId-nya, buang field buatannya
+
+Daftar judul pihak ketiga (mis. hasil panen sendiri) dipakai **hanya sebagai
+himpunan (type, tmdbId)**; seluruh isi katalog dibangun dari jawaban TMDB.
+Alasannya terukur pada berkas 50.072 entri yang dipakai sebagai daftar kerja:
+
+| Field | Temuan |
+|---|---|
+| `imdbId` | pola `ttNNNNNNN` untuk 50.072 entri; 14.355 tepat `tt0`+tmdbId. Dibuat-buat. |
+| `duration` | konstanta `1h 55m` untuk 46.046 film, `45m` untuk 3.205 serial |
+| `quality` | konstanta per tipe (`1080p FHD` / `FHD SERIES`) |
+
+Yang asli dan boleh dipakai: `tmdbId`, judul, poster, sinopsis, genre, rating,
+tahun. Verifikasinya sederhana: The Empress imdb aslinya `tt13720112`, bukan
+`tt0131488`; Inception runtime aslinya 148 menit, bukan "1h 55m".
+
+### 3g. Subtitle diminta SAAT TAYANG, bukan dipanen lalu diterbitkan
+
+Pola lapisan-lapisan lain (panen -> bangun -> terbitkan berkas) TIDAK dipakai
+untuk subtitle, dan itu disengaja:
+
+- 25 ribu film x 2 bahasa x ~50 KB kira-kira **2,5 GB**, sementara batas keras
+  Cloudflare Pages 25 MiB per berkas. Tidak akan pernah muat.
+- Memanen lalu menerbitkannya berarti Bytify menyalurkan ulang ribuan berkas
+  subtitle buatan orang lain dari CDN sendiri. Dengan permintaan saat tayang,
+  tiap pengguna mengambilnya dari OpenSubtitles di bawah ketentuan mereka
+  sendiri — pola yang dipakai VLC, Kodi, Plex, dan Jellyfin.
+
+**Kunci API ada di SERVER, tidak pernah di APK.** APK bisa dibongkar (apktool,
+strings) dan kuncinya dipakai orang lain sampai kuotanya habis. Karena itu ada
+proxy tipis: `backend/api/src/subtitles.mjs`, dipakai bersama oleh server Node
+dan fungsi Cloudflare.
+
+Tiga endpoint, dipisah berdasarkan **kuota**:
+
+| Endpoint | Kuota | Dipakai saat |
+|---|---|---|
+| `/api/subtitles?tmdbId=` | tidak | daftar pilihan subtitle |
+| `/api/subtitles/link?fileId=` | ya | kalau butuh tautannya sebagai JSON |
+| `/api/subtitles/file?fileId=` | ya | URL STABIL yang dipakai APK; 302 ke tautan sementara |
+
+APK menyimpan URL `/file` sebagai `MovieSubtitleDto.url`, jadi kuota baru
+terpakai ketika pemutar benar-benar mengunduh berkasnya — bukan ketika daftar
+subtitle tampil. Tautan sementara OpenSubtitles berumur pendek, jadi menyimpannya
+langsung akan basi.
+
+`OPENSUBTITLES_TERMS_ACCEPTED` harus `true` atau endpoint menjawab 503 tanpa
+menembak API — gerbang sadar yang sejajar dengan `LIVE_SOURCE_RIGHTS_CONFIRMED`.
+Semua variabel ada di `backend/api/.env.example`.
+
+**Penyambungan ke pemutar bersifat ADITIF**, sesuai keputusan 4: hasilnya
+ditambahkan ke daftar `subtitles` yang SAMA, sehingga konfigurasi ExoPlayer,
+pipa cue embed lewat `postMessage`, dan menu pemilih tidak berubah sama sekali.
+Subtitle dari katalog diutamakan; yang dari jaringan hanya menambah bahasa yang
+belum ada. Gagal = daftar kosong; pemutaran tidak boleh ikut gagal.
+
+Subtitle untuk penonton dengan gangguan pendengaran DITAWARKAN (ditandai "CC"),
+bukan disaring — itu justru salah satu alasan utama fitur ini ada.
+
+### 3h. Jembatan id katalog -> TMDB id lewat pencocokan KETAT
+
+Lapisan ketersediaan DAN subtitle keduanya dikunci TMDB id, sementara 25.186
+film LK21 memakai id siput tanpa TMDB id. `tmdb_match.py` menjembatani, dan
+aturannya sengaja kaku karena **salah pasang lebih buruk daripada tidak pasang**
+— menampilkan "ada di Netflix" atau subtitle film lain merusak kepercayaan pada
+seluruh fitur:
+
+1. Judul ternormalkan harus SAMA PERSIS dengan `title` atau `original_title`.
+   Tidak ada skor kemiripan.
+2. Tahun cocok dalam ±1 (beda tanggal rilis antar negara).
+3. Kalau lebih dari satu TMDB id lolos, judul itu DILEWATI sebagai ambigu.
+
+Normalisasi hanya mengizinkan satu padanan, `&` -> `and`. TIDAK membuang kata
+sandang dan TIDAK menyamakan angka Romawi, supaya "Rocky II" tidak tertukar
+dengan "Rocky III".
+
+Judul LK21 berpola "Judul (Tahun)" dan sebagian membawa judul asli di kurung
+dalam, mis. "10 Days of a Good Man (Iyi Adamin 10 Gunu) (2023)" — jadi beberapa
+kandidat kueri dicoba, termasuk isi kurungnya, karena judul asli sering yang
+terindeks TMDB sebagai `original_title`.
+
+Hasilnya masuk tabel `watch_aliases` dan dipakai `WatchRepository.tmdbUntuk()`.
+Yang ambigu sengaja TIDAK dipetakan.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 
@@ -351,7 +519,12 @@ kalau ingin angka yang sahih.
       (`DisallowStartIfOnBatteries=True`). Kalau daemon tampak tidak pernah
       jalan, periksa itu dulu sebelum mencurigai skripnya.
 - [ ] Sambungkan Galaxy A36 untuk pengukuran performa yang sahih
-- [ ] `fetch_subtitles.py` belum pernah dijalankan sungguhan (butuh kunci API)
+- [ ] Subtitle: proxy & penyambungan pemutar sudah jadi dan teruji (27 uji),
+      tetapi belum pernah menembak OpenSubtitles sungguhan — butuh
+      OPENSUBTITLES_API_KEY + OPENSUBTITLES_TERMS_ACCEPTED=true.
+      `fetch_subtitles.py` yang lama memakai pendekatan panen-lalu-terbit
+      yang tidak bisa dipakai (lihat 3g), dan `cari_imdb_id()`-nya mengambil
+      hasil pencarian TMDB PERTAMA tanpa verifikasi — itu bug salah pasang.
 - [ ] Podcast masih Indonesia saja; radio sudah lintas negara
 - [ ] Status kanal Live TV belum memverifikasi stream hidup/mati
 - [ ] Animasi navigasi belum dibandingkan bingkai-per-bingkai dengan video acuan

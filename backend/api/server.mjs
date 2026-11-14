@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { subtitleServiceDariEnv } from './src/subtitles.mjs';
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -102,9 +103,15 @@ export function toLiveChannel(item, checkedAtEpochMs) {
     };
 }
 
-export function createApp({ movieDatabasePath = MOVIE_DB_PATH, liveDatabasePath = LIVE_DB_PATH } = {}) {
+export function createApp({
+    movieDatabasePath = MOVIE_DB_PATH,
+    liveDatabasePath = LIVE_DB_PATH,
+    // Bisa disuntik oleh uji supaya kontraknya teruji tanpa kunci API nyata.
+    subtitleService = null,
+} = {}) {
     const app = express();
     const readDatabase = createDatabaseReader();
+    const subtitles = subtitleService || subtitleServiceDariEnv();
 
     app.use(cors());
     app.use(express.json());
@@ -113,7 +120,7 @@ export function createApp({ movieDatabasePath = MOVIE_DB_PATH, liveDatabasePath 
         res.json({
             ok: true,
             service: 'Bytify Backend API',
-            endpoints: ['/health', '/api/catalog.json', '/api/live/channels'],
+            endpoints: ['/health', '/api/catalog.json', '/api/live/channels', '/api/subtitles'],
         });
     });
 
@@ -191,6 +198,53 @@ export function createApp({ movieDatabasePath = MOVIE_DB_PATH, liveDatabasePath 
             console.error('[Bytify API] Failed to load movie catalog:', error);
             res.status(503).json({ ok: false, error: { code: 'CATALOG_UNAVAILABLE', message: 'Katalog film belum tersedia.' } });
         }
+    });
+
+    // Daftar subtitle untuk satu judul. Tidak memakan kuota unduh, jadi aman
+    // dipanggil saat halaman detail dibuka.
+    app.get('/api/subtitles', async (req, res) => {
+        const hasil = await subtitles.cari({
+            tmdbId: req.query.tmdbId,
+            languages: req.query.lang,
+            type: req.query.type,
+            season: req.query.season,
+            episode: req.query.episode,
+        });
+        const { status, ...sisa } = hasil;
+        if (status !== 200) {
+            return res.status(status).json({ ok: false, error: { code: 'SUBTITLE_UNAVAILABLE', message: sisa.error } });
+        }
+        return res.json({ ok: true, ...sisa });
+    });
+
+    // Tautan unduh sementara. MEMAKAN kuota OpenSubtitles, jadi hanya dipanggil
+    // ketika pengguna benar-benar menyalakan subtitle.
+    app.get('/api/subtitles/link', async (req, res) => {
+        const hasil = await subtitles.tautan({ fileId: req.query.fileId });
+        const { status, ...sisa } = hasil;
+        if (status !== 200) {
+            return res.status(status).json({ ok: false, error: { code: 'SUBTITLE_LINK_UNAVAILABLE', message: sisa.error } });
+        }
+        return res.json({ ok: true, ...sisa });
+    });
+
+    // URL STABIL per berkas subtitle, dialihkan ke tautan sementara
+    // OpenSubtitles saat diminta.
+    //
+    // Ini yang dipakai sebagai `MovieSubtitleDto.url` di APK, bukan tautan
+    // sementaranya langsung. Dua alasan: tautan itu berumur pendek, dan kuota
+    // unduh baru terpakai ketika pemutar benar-benar mengambil berkasnya —
+    // bukan saat daftar subtitle ditampilkan.
+    app.get('/api/subtitles/file', async (req, res) => {
+        const hasil = await subtitles.tautan({ fileId: req.query.fileId });
+        if (hasil.status !== 200) {
+            return res.status(hasil.status).json({
+                ok: false,
+                error: { code: 'SUBTITLE_LINK_UNAVAILABLE', message: hasil.error },
+            });
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        return res.redirect(302, hasil.link);
     });
 
     app.use((req, res) => {

@@ -72,6 +72,41 @@ if (fs.existsSync(indoSource)) {
     fs.copyFileSync(indoSource, indoOut);
 }
 
+// Anime juga terbit sebagai berkas sendiri. Sumbernya AniList, dan server
+// pemutarnya rute embed anime framextv yang dikunci dengan AniList id — pola
+// yang sama persis dengan film Indonesia yang memakai TMDB id.
+const animeSource = path.join(backendDir, 'data', 'anime_catalog.json');
+let animeCount = 0;
+let animeEpisodeCount = 0;
+if (fs.existsSync(animeSource)) {
+    const anime = readJson(animeSource); // validasi JSON sebelum menyalin
+    animeCount = Array.isArray(anime.movies) ? anime.movies.length : 0;
+    animeEpisodeCount = (anime.movies || []).reduce(
+        (jumlah, judul) => jumlah + (Array.isArray(judul.episodes) ? judul.episodes.length : 0),
+        0,
+    );
+    const animeOut = path.join(outputDir, 'api', 'anime.json');
+    fs.mkdirSync(path.dirname(animeOut), { recursive: true });
+    fs.copyFileSync(animeSource, animeOut);
+}
+
+// Lapisan KETERSEDIAAN RESMI: tiap judul membawa daftar penyedia sah di
+// Indonesia (data JustWatch lewat TMDB), bukan URL stream. Bentuknya beda dari
+// keempat katalog di atas — kuncinya `titles` + kamus `providers`, bukan
+// `movies` — karena ia bukan daftar yang bisa diputar di dalam aplikasi,
+// melainkan rujukan tonton yang dibuka di luar lewat intent.
+const watchSource = path.join(backendDir, 'data', 'watch_catalog.json');
+let watchCount = 0;
+let watchProviderCount = 0;
+if (fs.existsSync(watchSource)) {
+    const watch = readJson(watchSource); // validasi JSON sebelum menyalin
+    watchCount = Array.isArray(watch.titles) ? watch.titles.length : 0;
+    watchProviderCount = Object.keys(watch.providers || {}).length;
+    const watchOut = path.join(outputDir, 'api', 'watch.json');
+    fs.mkdirSync(path.dirname(watchOut), { recursive: true });
+    fs.copyFileSync(watchSource, watchOut);
+}
+
 // Live TV tetap dibangun dari database kanal (tidak berubah).
 const channels = readArray(path.join(backendDir, 'data', 'live_tv_database.json'))
     .map((channel) => toLiveChannel(channel, generatedAtEpochMs))
@@ -88,6 +123,9 @@ const movieCount = Array.isArray(catalog.movies) ? catalog.movies.length : 0;
 const sectionCount = Array.isArray(catalog.sections) ? catalog.sections.length : 0;
 console.log(
     `Copied ${movieCount} movies (${sectionCount} sections), ${seriesCount} series ` +
-        `(${seriesEpisodeCount} episodes) and ${indoCount} Indonesian films verbatim, ` +
+        `(${seriesEpisodeCount} episodes), ${indoCount} Indonesian films verbatim, ` +
+        `${animeCount} anime (${animeEpisodeCount} episodes), ` +
+        `${watchCount} titles with official availability ` +
+        `(${watchProviderCount} providers), ` +
         `and generated ${channels.length} live channels in ${outputDir}.`,
 );

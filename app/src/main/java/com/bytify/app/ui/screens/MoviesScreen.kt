@@ -241,18 +241,14 @@ fun MoviesScreen(embedded: Boolean = false) {
     // dipakai baris "Lanjutkan menonton".
     val peta by produceState(PetaFilm(), movies) {
         value = withContext(Dispatchers.Default) {
-            PetaFilm(
-                byId = movies.associateBy { it.id },
-                episodeOwner = movies.filter { it.isSeries }
-                    .flatMap { serial -> serial.episodes.map { it.id to serial } }.toMap(),
-            )
+            PetaFilm(byId = movies.associateBy { it.id })
         }
     }
     val resume = remember(history, peta) {
         history.filter { it.durationMs <= 0L || it.positionMs < it.durationMs - 15_000L }
             .mapNotNull { h ->
                 peta.byId[h.movieId]?.let { Triple(it, null as String?, h) }
-                    ?: peta.episodeOwner[h.movieId]?.let { Triple(it, h.movieId, h) }
+                    ?: pemilikEpisode(h.movieId)?.let { peta.byId[it] }?.let { Triple(it, h.movieId, h) }
             }
             .distinctBy { it.first.id }
             .take(12)
@@ -612,8 +608,24 @@ private const val ISI_DERET_GENRE = 20
 
 private data class PetaFilm(
     val byId: Map<String, Movie> = emptyMap(),
-    val episodeOwner: Map<String, Movie> = emptyMap(),
 )
+
+/**
+ * Menurunkan id SERIAL dari id EPISODE tanpa menyimpan daftar episode di
+ * memori. Dulu dibangun peta episode->serial berisi >150.000 entri hanya untuk
+ * mencari <=12 riwayat; itu, bersama episode yang diurai untuk tiap film,
+ * mematikan aplikasi dengan OOM setelah anime masuk.
+ *
+ * Dua format id episode:
+ *   anime  : "anilist-<id>-e<n>"      -> "anilist-<id>"
+ *   serial : "<slug>-s<musim>e<ep>"   -> "series-<slug>"
+ * Mengembalikan null kalau id bukan pola episode (berarti film biasa).
+ */
+private fun pemilikEpisode(idEpisode: String): String? {
+    Regex("""^(anilist-\d+)-e\d+$""").find(idEpisode)?.let { return it.groupValues[1] }
+    Regex("""^(.+)-s\d+e\d+$""").find(idEpisode)?.let { return "series-" + it.groupValues[1] }
+    return null
+}
 
 private data class DeretGenre(
     val genre: String,

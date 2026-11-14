@@ -56,6 +56,12 @@ def ramping(f):
     # Cermin lain jadi pilihan cadangan di menu server aplikasi.
     for i, basis in enumerate(CERMIN[1:], start=2):
         server.append({"server": f"framextv-{i}", "url": embed(tmdb, basis)})
+    # Lapisan ketersediaan kedua: vidcore, penyedia embed berkunci TMDB id yang
+    # sama. Ditemukan sebagai iframe pemutar cinevo (cinevo sendiri hanya
+    # membungkus TMDB + vidcore, jadi tak ada katalog baru dari sana). vidcore
+    # dijangkau langsung lewat TMDB id — vidcore.net mengalih ke vidcore.io,
+    # jadi dipakai host .io langsung. Server cadangan, bukan jaminan tiap judul.
+    server.append({"server": "vidcore", "url": f"https://vidcore.io/movie/{tmdb}"})
 
     hasil = {
         "id": f["id"],

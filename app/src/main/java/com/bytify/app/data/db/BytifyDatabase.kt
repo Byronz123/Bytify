@@ -25,8 +25,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LiveChannelEntity::class,
         LiveFavoriteEntity::class,
         CatalogSongEntity::class,
+        WatchTitleEntity::class,
+        WatchProviderEntity::class,
+        WatchAliasEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
@@ -187,9 +190,54 @@ abstract class BytifyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migrasi aditif: lapisan ketersediaan resmi (JustWatch lewat TMDB).
+         * Dua tabel baru, `movies` tidak disentuh sama sekali — favorit,
+         * riwayat, dan katalog film lama aman.
+         */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `watch_titles` (
+                       `id` TEXT NOT NULL,
+                       `tmdbId` INTEGER NOT NULL,
+                       `type` TEXT NOT NULL,
+                       `title` TEXT NOT NULL,
+                       `posterUrl` TEXT,
+                       `year` INTEGER,
+                       `overview` TEXT NOT NULL,
+                       `genresJson` TEXT NOT NULL,
+                       `rating` REAL,
+                       `runtimeMin` INTEGER,
+                       `watchJson` TEXT NOT NULL,
+                       `watchLink` TEXT,
+                       `updatedAt` INTEGER NOT NULL,
+                       PRIMARY KEY(`id`))""",
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_titles_tmdbId` ON `watch_titles` (`tmdbId`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_titles_type` ON `watch_titles` (`type`)")
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `watch_aliases` (
+                       `movieId` TEXT NOT NULL,
+                       `tmdbId` INTEGER NOT NULL,
+                       `type` TEXT NOT NULL,
+                       PRIMARY KEY(`movieId`))""",
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_aliases_tmdbId` ON `watch_aliases` (`tmdbId`)")
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `watch_providers` (
+                       `providerId` INTEGER NOT NULL,
+                       `name` TEXT NOT NULL,
+                       `logoPath` TEXT,
+                       `priority` INTEGER,
+                       PRIMARY KEY(`providerId`))""",
+                )
+            }
+        }
+
         fun create(context: Context): BytifyDatabase =
             Room.databaseBuilder(context, BytifyDatabase::class.java, "bytify.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
     }
 }

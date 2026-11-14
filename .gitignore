@@ -18,6 +18,15 @@ backend/data/bytify_database.json
 backend/data/series_database.json
 # Berkas sementara penulisan atomik; tertinggal kalau proses panen dimatikan.
 backend/data/series_database.json.*.tmp
+backend/data/anime_database.json
+backend/data/anime_database.json.*.tmp
+backend/data/watch_database.json
+# Perantara pencocokan judul -> TMDB id. Aliasnya ikut terbit di
+# watch_catalog.json, jadi berkas mentahnya tidak perlu dilacak.
+backend/data/tmdb_match.json
+backend/data/tmdb_match.json.*tmp
+backend/data/tmdb_match_worklist.json
+backend/data/watch_database.json.*tmp
 
 # Kunci rilis: JANGAN di-commit, simpan cadangannya di tempat aman
 keystore/
@@ -43,6 +52,9 @@ backend/data/film_indonesia_database.json
 backend/data/film_indonesia_database.json.*.tmp
 
 # Kunci API TMDB dan rahasia scraper lain.
+backend/api/.env
+backend/api/.env.*
+!backend/api/.env.example
 backend/scraper/.env
 backend/scraper/.env.*
 

@@ -35,11 +35,11 @@ class MovieRepository(
     // Pemetaan 10.000+ baris (parse serversJson tiap film) dipindah ke Default
     // agar tidak memblokir main thread saat sinkron katalog / toggle favorit.
     val movies: Flow<List<Movie>> = dao.movies()
-        .map { rows -> rows.map { it.toMovie(json) } }
+        .map { rows -> rows.map { it.toMovieRingkas(json) } }
         .flowOn(Dispatchers.Default)
         .stateIn(scope, SharingStarted.WhileSubscribed(TAHAN_MS, TAHAN_MS), emptyList())
     val favoriteMovies: Flow<List<Movie>> = dao.favoriteMovies()
-        .map { rows -> rows.map { it.toMovie(json) } }
+        .map { rows -> rows.map { it.toMovieRingkas(json) } }
         .flowOn(Dispatchers.Default)
     val favoriteIds: Flow<Set<String>> = dao.movieFavoriteIds().map { it.toSet() }
     val sections: Flow<List<MovieSection>> = dao.movieSections().map { rows ->
@@ -55,7 +55,7 @@ class MovieRepository(
     fun movie(id: String): Flow<Movie?> = dao.movie(id).map { it?.toMovie(json) }
 
     fun search(query: String): Flow<List<Movie>> = dao.searchMovies(query.trim())
-        .map { rows -> rows.map { it.toMovie(json) } }
+        .map { rows -> rows.map { it.toMovieRingkas(json) } }
         .flowOn(Dispatchers.Default)
 
     /**
@@ -129,7 +129,20 @@ class MovieRepository(
             }
             ?.size ?: 0
 
-        return validMovies.size + jumlahSerial + jumlahIndonesia
+        // Anime: berkas keempat, masuk ke tabel yang sama. Sections tidak
+        // disentuh, sama seperti serial dan film Indonesia.
+        val anime = runCatching { api.fetchAnimeCatalog() }.getOrNull()
+        val jumlahAnime = anime?.movies
+            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            ?.map { it.toMovie() }
+            ?.also { daftar ->
+                if (daftar.isNotEmpty()) {
+                    dao.upsertMovies(daftar.map { it.toEntity(json, now) })
+                }
+            }
+            ?.size ?: 0
+
+        return validMovies.size + jumlahSerial + jumlahIndonesia + jumlahAnime
     }
 
     /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */
@@ -206,6 +219,43 @@ private fun Movie.toEntity(json: Json, updatedAt: Long) = MovieEntity(
     sourceUrl = sourceUrl,
     serversJson = json.encodeToString(servers),
     updatedAt = updatedAt,
+)
+
+/**
+ * Pemetaan RINGKAS untuk daftar besar (grid film, pencarian, favorit).
+ *
+ * Daftar ini menahan SELURUH katalog di memori sekaligus (StateFlow), dan
+ * sejak anime masuk itu >51.000 film. Mengurai episodesJson/serversJson/
+ * subtitlesJson untuk tiap film berarti puluhan ribu objek episode hidup di
+ * memori sekaligus — terbukti mematikan aplikasi dengan OutOfMemoryError di
+ * Galaxy A36 (heap 256 MB) saat sinkron katalog keempat.
+ *
+ * Grid, pencarian, dan favorit TIDAK pernah membaca episodes/servers/
+ * subtitles — itu hanya dipakai layar detail & pemutar, yang memuat satu film
+ * lewat movie(id) dengan toMovie() penuh. Genre tetap diurai karena deret
+ * genre dibangun dari situ. "Lanjutkan menonton" menurunkan pemilik episode
+ * dari id-nya (lihat pemilikEpisode di MoviesScreen), jadi tidak butuh daftar
+ * episode di memori.
+ */
+private fun MovieEntity.toMovieRingkas(json: Json) = Movie(
+    id = id,
+    isSeries = type == "series",
+    episodes = emptyList(),
+    title = title,
+    overview = overview,
+    posterUrl = posterUrl,
+    backdropUrl = backdropUrl,
+    releaseYear = releaseYear,
+    durationMin = durationMin,
+    genres = runCatching { json.decodeFromString<List<String>>(genresJson) }.getOrDefault(emptyList()),
+    rating = rating,
+    language = language,
+    videoUrl = videoUrl,
+    trailerUrl = trailerUrl,
+    subtitles = emptyList(),
+    license = license,
+    sourceUrl = sourceUrl,
+    servers = emptyList(),
 )
 
 private fun MovieEntity.toMovie(json: Json) = Movie(

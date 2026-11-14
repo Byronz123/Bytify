@@ -7,6 +7,8 @@ import com.bytify.app.data.movie.USIA_KATALOG_DEFAULT_MS
 import com.bytify.app.data.remote.PodcastRepository
 import com.bytify.app.data.movie.MovieCatalogApi
 import com.bytify.app.data.movie.MovieRepository
+import com.bytify.app.data.movie.WatchRepository
+import com.bytify.app.data.movie.USIA_WATCH_DEFAULT_MS
 import com.bytify.app.data.live.LiveCatalogApi
 import com.bytify.app.data.live.LiveRepository
 import com.bytify.app.data.remote.RadioRepository
@@ -88,6 +90,8 @@ class AppContainer(context: Context) {
     val podcasts = PodcastRepository(okHttp, json, database.dao())
     val movieCatalogApi = MovieCatalogApi(okHttp, json, BuildConfig.MOVIE_CATALOG_URL)
     val movies = MovieRepository(database.dao(), movieCatalogApi, json, appScope)
+    /** Ketersediaan resmi per judul; dibaca hanya di halaman detail. */
+    val ketersediaan = WatchRepository(database.dao(), movieCatalogApi, json)
     val liveCatalogApi = LiveCatalogApi(okHttp, json, BuildConfig.LIVE_CATALOG_URL)
     val live = LiveRepository(database.dao(), liveCatalogApi, appScope)
     val updates = UpdateRepository(appContext, okHttp, json)
@@ -176,6 +180,7 @@ class AppContainer(context: Context) {
     init {
         autoDownloadLikedSongs()
         autoSyncKatalogFilm()
+        autoSyncKetersediaan()
         autoSyncTanggaLagu()
         autoSyncKatalogLagu()
     }
@@ -257,6 +262,30 @@ class AppContainer(context: Context) {
                     }
                     .onFailure { Log.w("BytifyKatalog", "sinkronisasi otomatis gagal: ${it.message}") }
                 delay(USIA_KATALOG_DEFAULT_MS)
+            }
+        }
+    }
+
+    /**
+     * Lapisan ketersediaan resmi disegarkan sehari sekali — jauh lebih lambat
+     * daripada katalog film, karena sebuah judul masuk atau keluar layanan
+     * dalam hitungan minggu, bukan jam.
+     *
+     * Kegagalan di sini TIDAK boleh mengganggu apa pun: lapisan ini tambahan,
+     * dan deploy yang belum memuat watch.json adalah keadaan yang sah.
+     */
+    private fun autoSyncKetersediaan() {
+        if (!ketersediaan.isConfigured) return
+        appScope.launch {
+            while (true) {
+                runCatching { ketersediaan.refreshIfStale() }
+                    .onSuccess { jumlah ->
+                        if (jumlah != KATALOG_MASIH_SEGAR && jumlah > 0) {
+                            Log.i("BytifyKatalog", "ketersediaan resmi diperbarui: $jumlah judul")
+                        }
+                    }
+                    .onFailure { Log.w("BytifyKatalog", "sinkron ketersediaan gagal: ${it.message}") }
+                delay(USIA_WATCH_DEFAULT_MS)
             }
         }
     }

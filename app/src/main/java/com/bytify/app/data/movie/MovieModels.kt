@@ -153,3 +153,108 @@ private fun String?.cleanUrlOrNull(): String? = this
         (value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)) &&
             !isJunkMediaUrl(value)
     }
+
+
+// --- Lapisan ketersediaan resmi (JustWatch lewat TMDB) ---------------------
+//
+// Bentuknya SENGAJA beda dari MovieCatalogDto: kuncinya `titles` dengan kamus
+// `providers` terpisah, bukan `movies`. Alasannya dua. Pertama, mengulang nama
+// penyedia ("Amazon Prime Video") di puluhan ribu entri jauh lebih mahal
+// daripada satu kamus 46 baris. Kedua, lapisan ini bukan daftar yang bisa
+// diputar di dalam aplikasi — tidak ada videoUrl atau servers di sini sama
+// sekali, dan uji kontrak di build-pages.test.mjs menjaga agar tetap begitu.
+
+/** Respons JSON lapisan ketersediaan resmi. */
+@Serializable
+data class WatchCatalogDto(
+    /** Atribusi wajib; ditampilkan di halaman detail. */
+    val attribution: String? = null,
+    val region: String = "ID",
+    /** id penyedia (sebagai teks, karena kunci JSON) -> nama & logo. */
+    val providers: Map<String, WatchProviderDto> = emptyMap(),
+    val titles: List<WatchTitleDto> = emptyList(),
+    /**
+     * id katalog -> TMDB id, hasil pencocokan ketat judul+tahun. Inilah yang
+     * menjembatani film LK21 berid siput ke lapisan ketersediaan & subtitle.
+     */
+    val aliases: Map<String, WatchAliasDto> = emptyMap(),
+)
+
+@Serializable
+data class WatchAliasDto(
+    val tmdbId: Int = 0,
+    val type: String = "movie",
+)
+
+@Serializable
+data class WatchProviderDto(
+    val name: String = "",
+    val logoPath: String? = null,
+    val priority: Int? = null,
+)
+
+@Serializable
+data class WatchTitleDto(
+    val id: String = "",
+    val tmdbId: Int = 0,
+    /** "movie" atau "tv" — ruang id TMDB terpisah untuk keduanya. */
+    val type: String = "movie",
+    val title: String = "",
+    val posterUrl: String? = null,
+    val year: Int? = null,
+    val overview: String = "",
+    val genres: List<String> = emptyList(),
+    val rating: Double? = null,
+    val runtimeMin: Int? = null,
+    /** jenis langganan -> daftar id penyedia, mis. {"flatrate":[8,159]}. */
+    val watch: Map<String, List<Int>> = emptyMap(),
+    /** Tautan resmi halaman tonton; dibuka DI LUAR aplikasi. */
+    val watchLink: String? = null,
+)
+
+/** Satu penyedia sah yang siap ditampilkan sebagai chip. */
+data class PenyediaTonton(
+    val id: Int,
+    val nama: String,
+    val logoUrl: String?,
+    /** "flatrate", "free", "ads", "rent", atau "buy". */
+    val jenis: String,
+)
+
+/** Ketersediaan resmi satu judul, sudah dipetakan untuk UI. */
+data class KetersediaanResmi(
+    val tmdbId: Int,
+    val judul: String,
+    val penyedia: List<PenyediaTonton>,
+    val tautan: String?,
+    val atribusi: String?,
+) {
+    val kosong: Boolean get() = penyedia.isEmpty()
+}
+
+
+// --- Subtitle dari OpenSubtitles lewat proxy backend ---------------------
+//
+// Kunci API TIDAK ada di APK: ia hanya di sisi server, dan APK memanggil
+// /api/subtitles. Kunci yang ditanam di APK bisa diambil siapa pun yang
+// membongkar berkasnya.
+
+@Serializable
+data class SubtitleResponseDto(
+    val ok: Boolean = false,
+    val tmdbId: Int = 0,
+    val subtitles: List<SubtitlePilihanDto> = emptyList(),
+    val totalFound: Int = 0,
+    val attribution: String? = null,
+)
+
+@Serializable
+data class SubtitlePilihanDto(
+    val fileId: Long = 0,
+    val fileName: String? = null,
+    val lang: String? = null,
+    val release: String? = null,
+    val downloads: Int = 0,
+    /** Subtitle untuk penonton dengan gangguan pendengaran. */
+    val hearingImpaired: Boolean = false,
+)

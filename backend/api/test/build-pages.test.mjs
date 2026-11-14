@@ -121,6 +121,124 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
             );
         }
 
+        // Katalog anime: penjagaan yang sama, ditambah satu hal khas anime —
+        // setiap judul harus membawa daftar episode, karena pemutarnya
+        // dikunci per episode (/embed/anime/<anilistId>/<n>). Judul tanpa
+        // episode akan tampil tetapi tidak bisa dibuka.
+        const animeSumber = path.join(backendDir, 'data', 'anime_catalog.json');
+        if (fs.existsSync(animeSumber)) {
+            const animePath = path.join(outDir, 'api', 'anime.json');
+            const animeMiB = fs.statSync(animePath).size / (1024 * 1024);
+            assert.ok(
+                animeMiB < AMAN_MIB,
+                `anime.json ${animeMiB.toFixed(2)} MiB melewati ambang aman ${AMAN_MIB} MiB.`,
+            );
+            const anime = JSON.parse(fs.readFileSync(animePath, 'utf8'));
+            assert.ok(anime.movies.length > 0, 'anime.json tidak boleh kosong');
+            assert.ok(
+                anime.movies.every((satu) => typeof satu.videoUrl === 'string' && satu.videoUrl),
+                'setiap anime harus punya videoUrl',
+            );
+            assert.ok(
+                anime.movies.every(
+                    (satu) => Array.isArray(satu.episodes) && satu.episodes.length > 0,
+                ),
+                'setiap anime harus punya minimal satu episode',
+            );
+            // Id ganda pernah membuat aplikasi mati di SubcomposeLayout
+            // ("Key ... was already used"), jadi ini dijaga di CI.
+            const id = new Set(anime.movies.map((satu) => satu.id));
+            assert.equal(id.size, anime.movies.length, 'id anime tidak boleh ganda');
+            assert.ok(
+                fs.readFileSync(animePath).equals(fs.readFileSync(animeSumber)),
+                'anime.json must be copied byte-for-byte',
+            );
+        }
+
+        // Lapisan ketersediaan resmi. Kontraknya BEDA dari keempat katalog di
+        // atas, dan bedanya itu yang dijaga: lapisan ini TIDAK boleh membawa
+        // URL yang bisa diputar. Ia hanya menunjuk ke penyedia sah, dan
+        // aplikasi membukanya di luar. Kalau suatu saat ada yang menyelipkan
+        // videoUrl/servers ke sini, uji ini gagal di CI.
+        const watchSumber = path.join(backendDir, 'data', 'watch_catalog.json');
+        if (fs.existsSync(watchSumber)) {
+            const watchPath = path.join(outDir, 'api', 'watch.json');
+            const watchMiB = fs.statSync(watchPath).size / (1024 * 1024);
+            assert.ok(
+                watchMiB < AMAN_MIB,
+                `watch.json ${watchMiB.toFixed(2)} MiB melewati ambang aman ${AMAN_MIB} MiB.`,
+            );
+            const watch = JSON.parse(fs.readFileSync(watchPath, 'utf8'));
+            assert.ok(watch.titles.length > 0, 'watch.json tidak boleh kosong');
+            assert.ok(watch.attribution, 'atribusi JustWatch/TMDB wajib ikut terbit');
+            assert.equal(watch.region, 'ID', 'wilayah lapisan ini Indonesia');
+
+            const JENIS = ['flatrate', 'free', 'ads', 'rent', 'buy'];
+            assert.ok(
+                watch.titles.every((satu) =>
+                    JENIS.some((jenis) => (satu.watch?.[jenis] || []).length > 0),
+                ),
+                'setiap judul harus punya minimal satu penyedia sah',
+            );
+            // Integritas rujukan: id penyedia di judul harus ada di kamus,
+            // kalau tidak chip-nya tampil tanpa nama.
+            const kamus = new Set(Object.keys(watch.providers || {}));
+            const hilang = new Set();
+            for (const satu of watch.titles) {
+                for (const jenis of JENIS) {
+                    for (const pid of satu.watch?.[jenis] || []) {
+                        if (!kamus.has(String(pid))) hilang.add(pid);
+                    }
+                }
+            }
+            assert.equal(
+                hilang.size,
+                0,
+                `id penyedia tanpa entri di kamus: ${[...hilang].join(', ')}`,
+            );
+            // Lapisan rujukan, bukan lapisan pemutaran.
+            assert.ok(
+                watch.titles.every(
+                    (satu) => !satu.videoUrl && !satu.servers && !satu.streamUrl,
+                ),
+                'lapisan ketersediaan tidak boleh membawa URL pemutaran',
+            );
+            // Alias id katalog -> TMDB id. Dipakai DUA lapisan (ketersediaan dan
+            // subtitle), jadi alias SAH menunjuk ke judul yang tidak ada di
+            // `titles`: sebuah film bisa tanpa layanan sah tapi punya subtitle.
+            // Yang dijaga: bentuknya, bukan keberadaan judulnya.
+            const alias = watch.aliases || {};
+            const kunciAlias = Object.keys(alias);
+            if (kunciAlias.length) {
+                assert.ok(
+                    kunciAlias.every((k) => typeof k === 'string' && k.length > 0),
+                    'id katalog pada alias tidak boleh kosong',
+                );
+                assert.ok(
+                    kunciAlias.every((k) => Number.isInteger(alias[k].tmdbId) && alias[k].tmdbId > 0),
+                    'setiap alias harus punya tmdbId bulat positif',
+                );
+                assert.ok(
+                    kunciAlias.every((k) => alias[k].type === 'movie' || alias[k].type === 'tv'),
+                    'type alias hanya boleh movie atau tv',
+                );
+                // Satu id katalog tidak boleh menunjuk ke dua TMDB id; itu akan
+                // membuat subtitle film lain tampil. Kunci objek JSON sudah unik,
+                // jadi yang perlu dijaga adalah tidak ada nilai yang cacat.
+                assert.ok(
+                    kunciAlias.every((k) => Object.keys(alias[k]).length === 2),
+                    'alias hanya boleh membawa tmdbId dan type',
+                );
+            }
+
+            const idWatch = new Set(watch.titles.map((satu) => satu.id));
+            assert.equal(idWatch.size, watch.titles.length, 'id watch tidak boleh ganda');
+            assert.ok(
+                fs.readFileSync(watchPath).equals(fs.readFileSync(watchSumber)),
+                'watch.json must be copied byte-for-byte',
+            );
+        }
+
         // Disalin apa adanya: byte-identik dengan sumber.
         assert.ok(
             fs.readFileSync(builtPath).equals(fs.readFileSync(sourcePath)),

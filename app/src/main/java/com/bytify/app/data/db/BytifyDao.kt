@@ -330,4 +330,58 @@ interface BytifyDao {
 
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeFromPlaylist(playlistId: Long, songId: String)
+
+    // --- Ketersediaan resmi (JustWatch lewat TMDB) -------------------------
+    //
+    // SENGAJA tidak ada Flow<List<WatchTitleEntity>> untuk seluruh tabel.
+    // Tabel ini puluhan ribu baris, dan StateFlow yang menahan seluruh daftar
+    // film di memori adalah yang pernah mematikan aplikasi dengan
+    // OutOfMemoryError di Galaxy A36. Semua akses di bawah ini bertitik: satu
+    // judul, atau sepotong daftar dengan LIMIT.
+
+    @Upsert
+    suspend fun upsertWatchTitles(rows: List<WatchTitleEntity>)
+
+    @Upsert
+    suspend fun upsertWatchProviders(rows: List<WatchProviderEntity>)
+
+    /** Ketersediaan satu judul. TMDB memakai ruang id terpisah untuk movie & tv. */
+    @Query("SELECT * FROM watch_titles WHERE tmdbId = :tmdbId AND type = :type LIMIT 1")
+    suspend fun watchTitle(tmdbId: Int, type: String): WatchTitleEntity?
+
+    /** Dipakai kalau tipenya belum diketahui; film lebih diutamakan. */
+    @Query(
+        """SELECT * FROM watch_titles WHERE tmdbId = :tmdbId
+           ORDER BY CASE type WHEN 'movie' THEN 0 ELSE 1 END LIMIT 1""",
+    )
+    suspend fun watchTitleAnyType(tmdbId: Int): WatchTitleEntity?
+
+    @Query("SELECT * FROM watch_providers WHERE providerId IN (:ids) ORDER BY priority ASC")
+    suspend fun watchProviders(ids: List<Int>): List<WatchProviderEntity>
+
+    @Query("SELECT * FROM watch_providers ORDER BY priority ASC")
+    suspend fun semuaWatchProviders(): List<WatchProviderEntity>
+
+    /** Sepotong daftar untuk deret "Tersedia Resmi"; selalu dengan batas. */
+    @Query(
+        """SELECT * FROM watch_titles
+           ORDER BY (year IS NULL), year DESC, (rating IS NULL), rating DESC
+           LIMIT :batas""",
+    )
+    suspend fun watchTerbaru(batas: Int): List<WatchTitleEntity>
+
+    @Upsert
+    suspend fun upsertWatchAliases(rows: List<WatchAliasEntity>)
+
+    @Query("SELECT * FROM watch_aliases WHERE movieId = :movieId LIMIT 1")
+    suspend fun watchAlias(movieId: String): WatchAliasEntity?
+
+    @Query("SELECT COUNT(*) FROM watch_aliases")
+    suspend fun jumlahWatchAlias(): Int
+
+    @Query("SELECT COUNT(*) FROM watch_titles")
+    suspend fun jumlahWatchTitle(): Int
+
+    @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM watch_titles")
+    suspend fun lastWatchSync(): Long
 }

@@ -3,6 +3,7 @@ package com.bytify.app.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,11 +44,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.bytify.app.data.movie.KetersediaanResmi
 import com.bytify.app.ui.LocalBottomInset
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
 import kotlinx.coroutines.launch
+
+/**
+ * Nama Indonesia untuk jenis langganan yang dipakai TMDB/JustWatch. Urutannya
+ * di [URUT_JENIS] sengaja menaruh yang tidak menambah biaya bagi pengguna lebih
+ * dulu: sudah termasuk langganan, lalu gratis, baru yang berbayar per judul.
+ */
+private val LABEL_JENIS = mapOf(
+    "flatrate" to "Termasuk langganan",
+    "free" to "Gratis",
+    "ads" to "Gratis dengan iklan",
+    "rent" to "Sewa",
+    "buy" to "Beli",
+)
+private val URUT_JENIS = listOf("flatrate", "free", "ads", "rent", "buy")
 
 /** Atribusi sumber katalog; dulu dikirim per film padahal nilainya seragam. */
 private const val LISENSI_BAWAAN = "LK21 Stream Adapter"
@@ -76,6 +95,14 @@ fun MovieDetailScreen(movieId: String) {
 
     LaunchedEffect(item.id) {
         repository.enrichIfNeeded(item)
+    }
+
+    // Ketersediaan resmi dibaca BERTITIK per judul, bukan dari daftar penuh di
+    // memori: tabelnya puluhan ribu baris dan menahannya sekaligus adalah
+    // jalan yang pernah mematikan aplikasi dengan OutOfMemoryError di A36.
+    var resmi by remember(item.id) { mutableStateOf<KetersediaanResmi?>(null) }
+    LaunchedEffect(item.id) {
+        resmi = runCatching { app.container.ketersediaan.ketersediaan(item.id) }.getOrNull()
     }
 
     val isFavorite = item.id in favoriteIds
@@ -143,6 +170,67 @@ fun MovieDetailScreen(movieId: String) {
             ) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null)
                 Text(if (item.isSeries) "  Putar episode 1" else "  Putar film")
+            }
+        }
+
+        resmi?.takeIf { !it.kosong }?.let { tersedia ->
+            Text(
+                "Tonton resmi di",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            )
+            val perJenis = tersedia.penyedia.groupBy { it.jenis }
+            URUT_JENIS.forEach { jenis ->
+                val daftar = perJenis[jenis] ?: return@forEach
+                Text(
+                    LABEL_JENIS[jenis] ?: jenis,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 16.dp, top = 6.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 20.dp, end = 16.dp, top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    daftar.forEach { penyedia ->
+                        AssistChip(
+                            onClick = {
+                                // Dibuka DI LUAR aplikasi: lapisan ini menunjuk
+                                // ke layanan sah, bukan memutar apa pun sendiri.
+                                val tujuan = tersedia.tautan
+                                if (tujuan.isNullOrBlank()) {
+                                    app.toast("Tautan resmi belum tersedia untuk judul ini.")
+                                } else {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(tujuan)))
+                                    }.onFailure { app.toast("Tidak ada aplikasi untuk membuka tautan.") }
+                                }
+                            },
+                            label = { Text(penyedia.nama, maxLines = 1) },
+                            leadingIcon = penyedia.logoUrl?.let { logo ->
+                                {
+                                    AsyncImage(
+                                        model = logo,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            tersedia.atribusi?.let { atribusi ->
+                Text(
+                    atribusi,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

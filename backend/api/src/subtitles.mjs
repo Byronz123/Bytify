@@ -111,6 +111,29 @@ export function createSubtitleService(options = {}, log = console) {
     return 'Layanan subtitle belum siap.';
   }
 
+  /**
+   * Nilai header HTTP hanya boleh ASCII cetak. Satu karakter liar — baris
+   * baru yang terbawa saat menempel nilai, spasi tak-putus, tanda kutip
+   * melengkung — membuat runtime melempar "Invalid header value", dan di
+   * Workers itu keluar sebagai error 1101 tanpa menyebut header mana.
+   *
+   * Dibersihkan DAN dilaporkan: kalau masih ada yang tak sah setelah
+   * dibersihkan, namanya disebut supaya ketahuan variabel mana yang salah isi.
+   */
+  function headerAman(nama, nilai) {
+    const bersih = String(nilai ?? '').replace(/[\r\n\t]/g, '').trim();
+    if (!/^[\x20-\x7E]*$/.test(bersih)) {
+      const kode = [...bersih]
+        .filter((ch) => ch < ' ' || ch > '~')
+        .map((ch) => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
+      throw new Error(
+        `Nilai ${nama} memuat karakter yang tidak sah untuk header HTTP (${[...new Set(kode)].join(', ')}). `
+        + 'Periksa isi variabel itu di environment.',
+      );
+    }
+    return bersih;
+  }
+
   async function panggil(path, { method = 'GET', body = null } = {}) {
     const kendali = new AbortController();
     const jam = setTimeout(() => kendali.abort(), timeoutMs);
@@ -119,9 +142,9 @@ export function createSubtitleService(options = {}, log = console) {
         method,
         signal: kendali.signal,
         headers: {
-          'Api-Key': apiKey,
+          'Api-Key': headerAman('OPENSUBTITLES_API_KEY', apiKey),
           // OpenSubtitles mewajibkan User-Agent yang menyebut aplikasinya.
-          'User-Agent': appName,
+          'User-Agent': headerAman('OPENSUBTITLES_APP_NAME', appName),
           Accept: 'application/json',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
         },

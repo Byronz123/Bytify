@@ -223,7 +223,14 @@ abstract class BytifyDatabase : RoomDatabase() {
                        `type` TEXT NOT NULL,
                        PRIMARY KEY(`movieId`))""",
                 )
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_aliases_tmdbId` ON `watch_aliases` (`tmdbId`)")
+                // SENGAJA tanpa index pada tmdbId. Satu-satunya kueri ke tabel
+                // ini mencari lewat movieId, yang sudah jadi kunci utama;
+                // index kedua hanya memakan ruang dan waktu tulis untuk 20 ribu
+                // baris. Lebih penting lagi: entitasnya tidak mendeklarasikan
+                // index, dan Room MEMBANDINGKAN indices saat memvalidasi
+                // migrasi — index yang dibuat di sini tapi tidak ada di entitas
+                // membuat aplikasi mati dengan "Migration didn't properly
+                // handle: watch_aliases". Itu sudah terjadi sekali di A36.
                 database.execSQL(
                     """CREATE TABLE IF NOT EXISTS `watch_providers` (
                        `providerId` INTEGER NOT NULL,

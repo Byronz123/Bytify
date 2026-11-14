@@ -108,6 +108,40 @@ class MovieCatalogApi(
         }
     }
 
+    /**
+     * Mengambil katalog film Indonesia, yang terbit sebagai berkas terpisah.
+     *
+     * Film-film ini diputar lewat embed framextv (berkunci TMDB id), bukan
+     * lewat server LK21 — terbukti berputar di Galaxy A36. Dipisah dari
+     * catalog.json karena alasan yang sama dengan serial: batas keras 25 MiB
+     * per berkas di Cloudflare Pages.
+     *
+     * Mengembalikan null bila berkasnya belum ada, agar APK lama tetap jalan.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    suspend fun fetchIndonesiaCatalog(): MovieCatalogDto? = withContext(Dispatchers.IO) {
+        if (!isConfigured) return@withContext null
+        val parsedUrl = "$baseApiUrl/api/indonesia.json".toHttpUrlOrNull() ?: return@withContext null
+        if (parsedUrl.scheme != "https" && !isAllowedHost(parsedUrl.host)) return@withContext null
+
+        val request = Request.Builder()
+            .url(parsedUrl)
+            .get()
+            .header("Accept", "application/json")
+            .header("User-Agent", "Bytify/${com.bytify.app.BuildConfig.VERSION_NAME} (Android)")
+            .build()
+
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val stream = response.body?.byteStream() ?: return@withContext null
+                json.decodeFromStream<MovieCatalogDto>(stream)
+            }
+        } catch (error: Exception) {
+            null
+        }
+    }
+
     /** Mengambil detail lengkap (sinopsis, trailer, dan seluruh episode series) dari backend LK21. */
     suspend fun fetchLk21Details(movieId: String): MovieDto? = withContext(Dispatchers.IO) {
         if (!isConfigured || !movieId.startsWith("lk21-")) return@withContext null

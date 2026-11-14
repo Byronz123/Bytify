@@ -116,7 +116,20 @@ class MovieRepository(
             }
             ?.size ?: 0
 
-        return validMovies.size + jumlahSerial
+        // Film Indonesia: berkas ketiga, masuk ke tabel yang sama. Sections
+        // tidak disentuh, sama seperti serial.
+        val indonesia = runCatching { api.fetchIndonesiaCatalog() }.getOrNull()
+        val jumlahIndonesia = indonesia?.movies
+            ?.filter { it.id.isNotBlank() && it.title.isNotBlank() }
+            ?.map { it.toMovie() }
+            ?.also { daftar ->
+                if (daftar.isNotEmpty()) {
+                    dao.upsertMovies(daftar.map { it.toEntity(json, now) })
+                }
+            }
+            ?.size ?: 0
+
+        return validMovies.size + jumlahSerial + jumlahIndonesia
     }
 
     /** Memperkaya sinopsis, trailer, dan daftar episode lengkap saat halaman detail dibuka. */

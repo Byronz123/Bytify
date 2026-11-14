@@ -559,7 +559,7 @@ fun MoviesScreen(embedded: Boolean = false) {
                     modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 4.dp),
                 )
             }
-            items(visibleMovies, key = { it.id }) { film ->
+            items(visibleMovies.distinctBy { it.id }, key = { it.id }) { film ->
                 MovieRow(
                     movie = film,
                     isFavorite = film.id in favoriteIds,
@@ -584,10 +584,13 @@ private const val BATAS_DERET_SERIAL = 4
 private fun kelompokkanGenre(daftar: List<Movie>, batas: Int = BATAS_DERET_GENRE): List<DeretGenre> {
     val ember = HashMap<String, MutableList<Movie>>()
     daftar.forEach { film ->
-        film.genres.forEach { mentah ->
-            val genre = mentah.trim()
-            if (genre.isNotEmpty()) ember.getOrPut(genre) { mutableListOf() }.add(film)
-        }
+        // Genre di-DISTINCT per film. Katalog bisa memuat nama genre yang sama
+        // dua kali (TMDB sesekali memulangkan genre_ids kembar); tanpa saringan
+        // ini film yang sama masuk dua kali ke satu deret, dan Compose menolak
+        // dua item berkunci sama dengan melempar IllegalArgumentException —
+        // terbukti mematikan aplikasi saat katalog Indonesia ditambahkan.
+        film.genres.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            .forEach { genre -> ember.getOrPut(genre) { mutableListOf() }.add(film) }
     }
     return ember.entries
         .filter { it.value.size >= batas }
@@ -646,7 +649,11 @@ private fun Deret(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(film, key = { judul + it.id }) { satu -> PosterCard(satu) { onBuka(satu) } }
+            // distinctBy + pemisah "|" supaya kunci tidak pernah bertabrakan,
+            // apa pun bentuk data yang datang dari katalog.
+            items(film.distinctBy { it.id }, key = { "$judul|${it.id}" }) { satu ->
+                PosterCard(satu) { onBuka(satu) }
+            }
         }
     }
 }

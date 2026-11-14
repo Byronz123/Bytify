@@ -90,6 +90,37 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
             );
         }
 
+        // Katalog film Indonesia: dijaga batas ukurannya, dan setiap film
+        // WAJIB punya videoUrl berupa embed - tanpa itu judulnya tampil lalu
+        // gagal diputar, yang lebih buruk daripada tidak ada sama sekali.
+        const indoSumber = path.join(backendDir, 'data', 'indonesia_catalog.json');
+        if (fs.existsSync(indoSumber)) {
+            const indoPath = path.join(outDir, 'api', 'indonesia.json');
+            const indoMiB = fs.statSync(indoPath).size / (1024 * 1024);
+            assert.ok(
+                indoMiB < AMAN_MIB,
+                `indonesia.json ${indoMiB.toFixed(2)} MiB melewati ambang aman ${AMAN_MIB} MiB.`,
+            );
+            const indo = JSON.parse(fs.readFileSync(indoPath, 'utf8'));
+            assert.ok(indo.movies.length > 0, 'indonesia.json tidak boleh kosong');
+            assert.ok(
+                indo.movies.every((satu) => typeof satu.videoUrl === 'string' && satu.videoUrl),
+                'setiap film Indonesia harus punya videoUrl',
+            );
+            assert.ok(
+                indo.movies.every((satu) => Array.isArray(satu.servers) && satu.servers.length > 0),
+                'setiap film Indonesia harus punya daftar server',
+            );
+            assert.ok(
+                indo.movies.every((satu) => (satu.countries || []).includes('Indonesia')),
+                'setiap entri harus bertanda negara Indonesia',
+            );
+            assert.ok(
+                fs.readFileSync(indoPath).equals(fs.readFileSync(indoSumber)),
+                'indonesia.json must be copied byte-for-byte',
+            );
+        }
+
         // Disalin apa adanya: byte-identik dengan sumber.
         assert.ok(
             fs.readFileSync(builtPath).equals(fs.readFileSync(sourcePath)),

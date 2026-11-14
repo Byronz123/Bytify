@@ -58,6 +58,20 @@ if (fs.existsSync(seriesSource)) {
     fs.copyFileSync(seriesSource, seriesOut);
 }
 
+// Katalog film Indonesia terbit sebagai berkas sendiri, dengan alasan yang
+// sama seperti serial: catalog.json sudah 23,26 MiB dan Cloudflare Pages
+// menolak berkas di atas 25 MiB. Isinya memakai server embed framextv, jadi
+// film Indonesia bisa diputar tanpa mengubah apa pun pada katalog LK21.
+const indoSource = path.join(backendDir, 'data', 'indonesia_catalog.json');
+let indoCount = 0;
+if (fs.existsSync(indoSource)) {
+    const indo = readJson(indoSource); // validasi JSON sebelum menyalin
+    indoCount = Array.isArray(indo.movies) ? indo.movies.length : 0;
+    const indoOut = path.join(outputDir, 'api', 'indonesia.json');
+    fs.mkdirSync(path.dirname(indoOut), { recursive: true });
+    fs.copyFileSync(indoSource, indoOut);
+}
+
 // Live TV tetap dibangun dari database kanal (tidak berubah).
 const channels = readArray(path.join(backendDir, 'data', 'live_tv_database.json'))
     .map((channel) => toLiveChannel(channel, generatedAtEpochMs))
@@ -73,7 +87,7 @@ writeJson(path.join(outputDir, 'health'), { ok: true });
 const movieCount = Array.isArray(catalog.movies) ? catalog.movies.length : 0;
 const sectionCount = Array.isArray(catalog.sections) ? catalog.sections.length : 0;
 console.log(
-    `Copied ${movieCount} movies (${sectionCount} sections) and ${seriesCount} series ` +
-        `(${seriesEpisodeCount} episodes) verbatim and generated ` +
-        `${channels.length} live channels in ${outputDir}.`,
+    `Copied ${movieCount} movies (${sectionCount} sections), ${seriesCount} series ` +
+        `(${seriesEpisodeCount} episodes) and ${indoCount} Indonesian films verbatim, ` +
+        `and generated ${channels.length} live channels in ${outputDir}.`,
 );

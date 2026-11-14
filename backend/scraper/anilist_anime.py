@@ -26,6 +26,13 @@ import time
 
 import requests
 
+#: AniList menolak klien yang tidak memperkenalkan diri dengan Cloudflare
+#: error 1010 ("browser_signature_banned"), dan kegagalannya SENYAP: tiap
+#: permintaan habis di percobaan ulang, jadi panen tampak berjalan padahal
+#: tidak memulangkan apa pun. Menyebut jati diri adalah etiket API biasa —
+#: bukan menyamar sebagai browser.
+UA_BYTIFY = "Bytify/1.3.0 (+https://github.com/Byronz123/Bytify)"
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -62,6 +69,9 @@ query ($page: Int, $perPage: Int, $tahun: Int) {
 """
 
 sesi = requests.Session()
+# Tanpa ini AniList menjawab Cloudflare 1010 dan panen gagal SENYAP:
+# tiap permintaan habis di percobaan ulang tanpa memulangkan apa pun.
+sesi.headers.update({"User-Agent": UA_BYTIFY})
 
 
 def _tanya(variabel, percobaan=5):

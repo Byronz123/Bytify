@@ -547,11 +547,20 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // boleh ikut gagal karenanya.
     var subtitlesJaring by remember(playKey) { mutableStateOf<List<MovieSubtitleDto>>(emptyList()) }
     LaunchedEffect(playKey) {
-        val acuan = runCatching { app.container.ketersediaan.tmdbUntuk(movie.id) }.getOrNull()
-            ?: return@LaunchedEffect
+        val ket = app.container.ketersediaan
+        val acuan = runCatching { ket.tmdbUntuk(movie.id) }.getOrNull() ?: return@LaunchedEffect
+        val (tmdbId, tipeTmdb) = acuan
+        val perEpisode = episode != null && tipeTmdb == "tv"
+
+        // Anime yang berbagi entri TMDB dengan musim lain dilewati: episode
+        // kita semuanya bernomor musim 1, jadi permintaannya akan memulangkan
+        // subtitle musim yang salah. Chip ketersediaannya tetap tampil —
+        // "ada di Netflix" benar untuk seluruh musim.
+        if (perEpisode && !ket.amanSubtitlePerEpisode(tmdbId, tipeTmdb)) return@LaunchedEffect
+
         subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
-            tmdbId = acuan.first,
-            type = if (episode != null && acuan.second == "tv") "episode" else "movie",
+            tmdbId = tmdbId,
+            type = if (perEpisode) "episode" else "movie",
             season = episode?.season,
             episode = episode?.episode,
         )

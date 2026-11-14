@@ -211,6 +211,28 @@ class WatchRepository(
         return alias.tmdbId to alias.type
     }
 
+    /**
+     * Apakah aman meminta subtitle PER EPISODE untuk judul ini.
+     *
+     * Masalahnya khas anime: AniList memecah serial per musim sementara TMDB
+     * menyatukannya, jadi beberapa judul katalog menunjuk ke satu TMDB id.
+     * Episode kita semuanya bernomor musim 1, jadi untuk judul yang berbagi
+     * id, meminta "musim 1 episode 5" akan memulangkan subtitle MUSIM YANG
+     * SALAH. Subtitle film lain lebih buruk daripada tidak ada subtitle, jadi
+     * untuk judul seperti itu permintaannya dilewati.
+     *
+     * Ketersediaan TIDAK terpengaruh: "ada di Netflix" tetap benar untuk
+     * seluruh musim, jadi chipnya tetap tampil.
+     */
+    suspend fun amanSubtitlePerEpisode(tmdbId: Int, tipe: String): Boolean =
+        withContext(Dispatchers.Default) {
+            if (tipe != "tv") return@withContext true
+            val jumlah = runCatching { dao.jumlahAliasUntukTmdb(tmdbId, tipe) }.getOrDefault(0)
+            // 0 berarti judul ini tidak lewat alias sama sekali (TMDB id-nya
+            // ada di dalam id-nya sendiri), jadi tidak ada ambiguitas musim.
+            jumlah <= 1
+        }
+
     /** Sepotong daftar judul yang tersedia resmi, selalu dengan batas. */
     suspend fun terbaru(batas: Int = 60): List<WatchTitleEntity> =
         runCatching { dao.watchTerbaru(batas) }.getOrDefault(emptyList())

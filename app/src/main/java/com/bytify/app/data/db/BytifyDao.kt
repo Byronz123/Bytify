@@ -376,6 +376,17 @@ interface BytifyDao {
     @Query("SELECT * FROM watch_aliases WHERE movieId = :movieId LIMIT 1")
     suspend fun watchAlias(movieId: String): WatchAliasEntity?
 
+    /**
+     * Berapa judul katalog yang menunjuk ke satu TMDB id yang sama.
+     *
+     * Dipakai untuk tahu apakah sebuah anime berbagi entri TMDB dengan musim
+     * lain: AniList memecah per musim, TMDB menyatukannya, jadi 3.817 dari
+     * 7.877 anime berbagi id. Tanpa kolom penanda, datanya sendiri yang
+     * menjawab — tidak perlu migrasi baru.
+     */
+    @Query("SELECT COUNT(*) FROM watch_aliases WHERE tmdbId = :tmdbId AND type = :type")
+    suspend fun jumlahAliasUntukTmdb(tmdbId: Int, type: String): Int
+
     @Query("SELECT COUNT(*) FROM watch_aliases")
     suspend fun jumlahWatchAlias(): Int
 

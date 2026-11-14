@@ -57,6 +57,9 @@ backend/scraper/tmdb_watch.py          pemanen KETERSEDIAAN RESMI per judul dari
                                        permintaan sekalian membawa runtime, imdb_id,
                                        dan genre ASLI. Bisa dilanjutkan.
 backend/scraper/build_watch_catalog.py   watch_database.json -> watch_catalog.json
+backend/scraper/anilist_tmdb_map.py    AniList id -> TMDB id lewat dataset
+                                       pemetaan publik, diverifikasi ulang.
+                                       Fase: --buat-daftar, --judul, --verifikasi
 backend/scraper/tmdb_match.py          judul katalog LK21 -> TMDB id, KETAT:
                                        judul ternormalkan sama persis + tahun ±1,
                                        yang ambigu dilewati. Bisa dilanjutkan.
@@ -320,6 +323,54 @@ terindeks TMDB sebagai `original_title`.
 
 Hasilnya masuk tabel `watch_aliases` dan dipakai `WatchRepository.tmdbUntuk()`.
 Yang ambigu sengaja TIDAK dipetakan.
+
+### 3i. Jembatan anime: dataset pemetaan, DIVERIFIKASI ulang
+
+Anime tidak bisa dijembatani dengan pencocokan judul seperti film LK21: satu
+judul punya bentuk romaji, Inggris, dan Jepang, dan TMDB memecah anime antara
+`movie` dan `tv`. Yang dipakai dataset pemetaan publik yang sudah dikurasi
+(Fribb/anime-lists), `anilist_id -> themoviedb_id` beserta tipenya.
+
+**Dataset itu tidak dipercaya mentah.** Tiap pemetaan diverifikasi terhadap
+judul yang dipulangkan TMDB sendiri, dan verifikasinya gratis karena panen
+ketersediaan memang sudah mengambil judul. Hasilnya 98,1% dari 7.877 kandidat
+(4.858 judul sama persis, 1.443 tahun cocok, 1.423 warisan musim saudara);
+101 ditolak dan dibuang.
+
+Tiga jebakan yang ditemukan, semuanya sudah tertangani di kodenya:
+
+- **Bentuk nilai BERBEDA antar jenis**: `{"tv": 26209}` int, tetapi
+  `{"movie": [128]}` LIST. Memperlakukan keduanya sebagai int membuang 1.365
+  pemetaan film diam-diam, tanpa galat apa pun.
+- **anime_database.json hanya menyimpan ROMAJI.** Membandingkannya dengan judul
+  Inggris TMDB menolak pemetaan yang benar — "Youchien WARS" vs "Kindergarten
+  Wars", "Shingeki no Kyojin" vs "Attack on Titan". Judul Inggris diambil
+  terpisah lewat `--judul`.
+- **AniList memecah musim, TMDB menyatukan.** Penanda musim dibuang sebelum
+  membandingkan, dan musim yang belum tayang (tanpa judul Inggris, tahunnya
+  tentu tidak cocok) mewarisi pembuktian dari musim saudaranya yang sudah lolos.
+
+**AniList menolak klien yang tidak memperkenalkan diri** dengan Cloudflare
+error 1010, dan kegagalannya SENYAP: tiap permintaan habis di percobaan ulang
+sehingga panen tampak berjalan selama 20 menit padahal tidak memulangkan apa
+pun. `UA_BYTIFY` menyebut nama aplikasi dan repositorinya — etiket API biasa,
+sama seperti yang diwajibkan OpenSubtitles, BUKAN menyamar sebagai browser.
+`anilist_anime.py` ikut diperbaiki karena punya celah yang sama.
+
+### 3j. Subtitle anime dilewati kalau musimnya ambigu
+
+AniList memecah serial per musim sementara TMDB menyatukannya, jadi 3.747 dari
+7.724 anime berbagi satu entri TMDB dengan musim lain. Episode di katalog kita
+SEMUANYA bernomor musim 1, jadi untuk judul yang berbagi id, meminta "musim 1
+episode 5" memulangkan subtitle MUSIM YANG SALAH.
+
+Karena itu `WatchRepository.amanSubtitlePerEpisode()` menghitung berapa baris
+`watch_aliases` menunjuk ke satu TMDB id; lebih dari satu berarti ambigu dan
+permintaan subtitlenya dilewati. Datanya sendiri yang menjawab — tidak perlu
+kolom penanda maupun migrasi baru.
+
+**Ketersediaan TIDAK terpengaruh**: "ada di Netflix" benar untuk seluruh musim,
+jadi chipnya tetap tampil untuk semuanya.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 

@@ -35,10 +35,17 @@ DIR_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data"
 SUMBER = os.path.join(DIR_DATA, "watch_database.json")
 KELUARAN = os.path.join(DIR_DATA, "watch_catalog.json")
 
-#: Jembatan id katalog -> TMDB id dari tmdb_match.py. Opsional: kalau belum ada,
-#: berkasnya terbit tanpa alias dan lapisan ini tetap jalan untuk judul yang
-#: TMDB id-nya sudah ada di dalam id-nya sendiri ("tmdb-<id>").
-SUMBER_ALIAS = os.path.join(DIR_DATA, "tmdb_match.json")
+#: Jembatan id katalog -> TMDB id. DUA sumber, dengan cara yang berbeda:
+#:   - tmdb_match.json     film LK21, lewat pencocokan judul+tahun yang ketat
+#:   - anime_tmdb_map.json anime, lewat dataset pemetaan publik yang sudah
+#:                         diverifikasi ulang terhadap judul dari TMDB
+#: Keduanya opsional: kalau belum ada, berkasnya terbit tanpa alias dan
+#: lapisan ini tetap jalan untuk judul yang TMDB id-nya sudah ada di dalam
+#: id-nya sendiri ("tmdb-<id>").
+SUMBER_ALIAS = (
+    os.path.join(DIR_DATA, "tmdb_match.json"),
+    os.path.join(DIR_DATA, "anime_tmdb_map.json"),
+)
 
 #: Jenis langganan yang dipertahankan, urut dari yang paling berguna bagi
 #: pengguna: termasuk langganan, gratis, gratis beriklan, sewa, beli.
@@ -105,18 +112,24 @@ def muat_alias():
     sebuah judul bisa tidak ada di layanan sah mana pun tapi tetap punya
     subtitle, dan sebaliknya.
     """
-    if not os.path.exists(SUMBER_ALIAS):
-        return {}
-    try:
-        with open(SUMBER_ALIAS, encoding="utf-8") as f:
-            d = json.load(f)
-    except Exception:
-        return {}
     keluar = {}
-    for idFilm, acuan in (d.get("matches") or {}).items():
-        tid, jenis = acuan.get("tmdbId"), acuan.get("type")
-        if isinstance(tid, int) and tid > 0 and jenis in ("movie", "tv"):
-            keluar[idFilm] = {"tmdbId": tid, "type": jenis}
+    for jalur in SUMBER_ALIAS:
+        if not os.path.exists(jalur):
+            continue
+        try:
+            with open(jalur, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        for idFilm, acuan in (d.get("matches") or {}).items():
+            tid, jenis = acuan.get("tmdbId"), acuan.get("type")
+            if isinstance(tid, int) and tid > 0 and jenis in ("movie", "tv"):
+                # Satu id katalog tidak boleh menunjuk dua TMDB id. Sumbernya
+                # terpisah (lk21- vs anilist-), jadi bentrokan berarti ada yang
+                # salah — yang pertama dipertahankan dan bentrokannya dihitung.
+                if idFilm in keluar and keluar[idFilm]["tmdbId"] != tid:
+                    continue
+                keluar[idFilm] = {"tmdbId": tid, "type": jenis}
     return keluar
 
 
@@ -174,6 +187,9 @@ def main():
     print("  per jenis: " + ", ".join("%s=%d" % (j, hitung[j]) for j in JENIS))
     print("  %d judul dilewati (tanpa penyedia sah di Indonesia)" % tanpa)
     if alias:
+        import collections as _c
+        asal = _c.Counter(k.split("-")[0] for k in alias)
+        print("  alias per sumber: " + ", ".join("%s=%d" % kv for kv in asal.most_common()))
         cocok_tersedia = sum(
             1 for v in alias.values()
             if ("tmdb-%s-%d" % (v["type"], v["tmdbId"])) in lihat

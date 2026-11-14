@@ -28,8 +28,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WatchTitleEntity::class,
         WatchProviderEntity::class,
         WatchAliasEntity::class,
+        MovieGenreEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
@@ -242,9 +243,32 @@ abstract class BytifyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migrasi aditif: genre sebagai baris, supaya deret genre di layar Film
+         * tidak lagi butuh seluruh daftar film di memori.
+         *
+         * Tabelnya dibiarkan KOSONG di sini. Mengisinya butuh mengurai
+         * genresJson untuk 51 ribu baris, dan melakukan itu di dalam migrasi
+         * akan menahan pembukaan database — tepat di layar pertama. Isi
+         * menyusul pada sinkron katalog berikutnya, yang memang sudah berjalan
+         * otomatis; sampai itu terjadi, deret genre tampil kosong dan tidak ada
+         * yang rusak.
+         */
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `movie_genres` (
+                       `movieId` TEXT NOT NULL,
+                       `genre` TEXT NOT NULL,
+                       PRIMARY KEY(`movieId`, `genre`))""",
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_movie_genres_genre` ON `movie_genres` (`genre`)")
+            }
+        }
+
         fun create(context: Context): BytifyDatabase =
             Room.databaseBuilder(context, BytifyDatabase::class.java, "bytify.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
     }
 }

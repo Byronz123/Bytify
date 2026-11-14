@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.bytify.app.data.movie.Movie
 import com.bytify.app.ui.LocalBottomInset
+import com.bytify.app.data.movie.DeretGenre
 import com.bytify.app.ui.Routes
 import com.bytify.app.ui.appState
 import com.bytify.app.ui.theme.BytifyColors
@@ -77,10 +80,12 @@ fun MoviesScreen(embedded: Boolean = false) {
     val app = appState()
     val repository = app.container.movies
     val scope = rememberCoroutineScope()
-    val movies by repository.movies.collectAsState(initial = emptyList())
     val favorites by repository.favoriteMovies.collectAsState(initial = emptyList())
     val favoriteIds by repository.favoriteIds.collectAsState(initial = emptySet())
     val history by repository.history.collectAsState(initial = emptyList())
+    // Hanya JUMLAHNYA yang dikumpulkan, bukan daftarnya. Daftar 51.015 film
+    // memuncak di 101 MB pada Galaxy A36 yang batas heap-nya 256 MB.
+    val jumlahFilm by repository.jumlahFilm.collectAsState(initial = 0)
 
     var query by rememberSaveable { mutableStateOf("") }
     // Ketikan tampil seketika lewat [query]; penyaringan 25.135 film memakai
@@ -150,43 +155,22 @@ fun MoviesScreen(embedded: Boolean = false) {
     // setiap recomposition. Catatan hasil ukur: ini TIDAK menurunkan jank saat
     // kolom cari kosong (predikatnya langsung true, jadi sudah murah); gunanya
     // terasa saat pengguna mengetik kueri, ketika pemindaian benar-benar bekerja.
-    val source = remember(selectedFilter, movies, favorites) {
-        when {
-            selectedFilter == "favorites" -> favorites
-            selectedFilter == "movie" -> movies.filter { !it.isSeries }
-            selectedFilter == "series" -> movies.filter { it.isSeries }
-            selectedFilter.startsWith("genre:") -> {
-                val genre = selectedFilter.removePrefix("genre:")
-                movies.filter { film -> !film.isSeries && film.genres.any { it.equals(genre, true) } }
-            }
-            selectedFilter == "rating" ->
-                movies.filter { !it.isSeries && (it.rating ?: 0.0) > 0.0 }
-                    .sortedByDescending { it.rating ?: 0.0 }
-            selectedFilter.startsWith("serialgenre:") -> {
-                val genre = selectedFilter.removePrefix("serialgenre:")
-                movies.filter { film -> film.isSeries && film.genres.any { it.equals(genre, true) } }
-            }
-            else -> movies
-        }
-    }
 
     // Katalog LK21 yang dipanen sejauh ini tidak memuat satu pun serial (25.135
     // entri, semuanya bertipe "movie"): penjelajah memang melewati /series,
     // /nontondrama, dan /anime. Chip Film/Serial karena itu hanya ditawarkan
     // kalau datanya benar-benar ada, supaya tidak ada saringan yang pasti kosong.
-    val adaSerial = remember(movies) { movies.any { it.isSeries } }
+    val adaSerial by repository.adaSerial.collectAsState(initial = false)
 
     // Deret per genre dibangun DI LUAR main thread. Film dan serial dipisah:
     // keduanya punya etalase sendiri, jadi deret genre serial tidak tercampur
     // dengan 25 ribu film. Tiap deret menyimpan jumlah penuhnya untuk tombol
     // "Lihat semua".
-    val deretGenre by produceState(emptyList<DeretGenre>(), movies) {
-        value = withContext(Dispatchers.Default) { kelompokkanGenre(movies.filter { !it.isSeries }) }
+    val deretGenre by produceState(emptyList<DeretGenre>(), jumlahFilm) {
+        value = repository.deretGenre(serial = false, batasDeret = BATAS_DERET_GENRE, isiDeret = ISI_DERET_GENRE)
     }
-    val deretSerial by produceState(emptyList<DeretGenre>(), movies) {
-        value = withContext(Dispatchers.Default) {
-            kelompokkanGenre(movies.filter { it.isSeries }, batas = BATAS_DERET_SERIAL)
-        }
+    val deretSerial by produceState(emptyList<DeretGenre>(), jumlahFilm) {
+        value = repository.deretGenre(serial = true, batasDeret = BATAS_DERET_SERIAL, isiDeret = ISI_DERET_GENRE)
     }
 
     // Bagian "Film Terbaru <tahun>" dibentuk dari tahun berjalan perangkat,
@@ -195,67 +179,74 @@ fun MoviesScreen(embedded: Boolean = false) {
     // tanpa menunggu scraper, deploy, atau APK baru.
     // "Rating Tertinggi" dihitung dari SELURUH katalog, bukan dari bagian
     // bawaan katalog yang isinya sudah dipotong 20 id.
-    val ratingTertinggi by produceState(emptyList<Movie>(), movies) {
-        value = withContext(Dispatchers.Default) {
-            movies.filter { !it.isSeries && (it.rating ?: 0.0) > 0.0 }
-                .sortedByDescending { it.rating ?: 0.0 }
-        }
+    val ratingTertinggi by produceState(emptyList<Movie>(), jumlahFilm) {
+        value = repository.ratingTertinggi(ISI_DERET_GENRE)
     }
 
     val tahunIni = remember { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) }
     // Tahun diambil dari katalognya sendiri, bukan rentang tetap: begitu film
     // bertahun baru masuk, tahunnya ikut muncul sebagai pilihan.
-    val tahunTersedia by produceState(emptyList<Int>(), movies) {
-        value = withContext(Dispatchers.Default) {
-            movies.mapNotNull { it.releaseYear }.distinct().sortedDescending()
-        }
+    val tahunTersedia by produceState(emptyList<Int>(), jumlahFilm) {
+        value = repository.tahunTersedia()
     }
-    val filmTahunIni by produceState(emptyList<Movie>(), movies, tahunIni) {
-        value = withContext(Dispatchers.Default) {
-            movies.filter { !it.isSeries && it.releaseYear == tahunIni }
-                .sortedByDescending { it.rating ?: 0.0 }
+    val filmTahunIni by produceState(emptyList<Movie>(), jumlahFilm, tahunIni) {
+        value = repository.filmTahun(tahunIni, ISI_DERET_GENRE)
+    }
+
+    // Penyaringan tidak lagi dikerjakan di memori. Dulu sekali jalan memakan
+    // ~600 ms di Galaxy A36 karena memindai 25.135 film; sekarang SQL yang
+    // mengerjakannya, dan hanya satu halaman yang ditahan.
+    val modeFavorit = selectedFilter == "favorites"
+
+    // Favorit jumlahnya kecil dan sudah punya alirannya sendiri, jadi tidak
+    // lewat Paging — disaring di memori seperti sebelumnya.
+    val favoritTersaring = remember(favorites, queryTersaring, tahunTerpilih) {
+        favorites.filter { film ->
+            val cocokTahun = tahunTerpilih == null || film.releaseYear == tahunTerpilih
+            val cocokKueri = queryTersaring.isBlank() ||
+                film.title.contains(queryTersaring, true) ||
+                film.overview.contains(queryTersaring, true) ||
+                film.genres.any { it.contains(queryTersaring, true) }
+            cocokKueri && cocokTahun
         }
     }
 
-    // Penyaringan 25.135 film dijalankan DI LUAR main thread. Terukur di Galaxy
-    // A36: sekali jalan memakan ~600 ms, yang muncul sebagai satu pembekuan saat
-    // mengetik. produceState membiarkan daftar lama tampil sampai hasil baru siap.
-    val visibleMovies by produceState(
-        initialValue = emptyList<Movie>(),
-        source, queryTersaring, tahunTerpilih,
-    ) {
-        val tahun = tahunTerpilih
-        value = withContext(Dispatchers.Default) {
-            source.filter { movie ->
-                val matchesTahun = tahun == null || movie.releaseYear == tahun
-                val matchesQuery = queryTersaring.isBlank() ||
-                    movie.title.contains(queryTersaring, true) ||
-                    movie.overview.contains(queryTersaring, true) ||
-                    movie.genres.any { it.contains(queryTersaring, true) }
-                matchesQuery && matchesTahun
-            }
-        }
+    val alirHalaman = remember(selectedFilter, queryTersaring, tahunTerpilih) {
+        repository.halaman(selectedFilter, queryTersaring, tahunTerpilih)
     }
+    val halaman = alirHalaman.collectAsLazyPagingItems()
+
+    // Hitungan dari SQL, bukan `halaman.itemCount` yang hanya menghitung yang
+    // sudah dimuat — kalau pakai itu, label "N film" berubah sambil menggulir.
+    val jumlahCocok by produceState(0, selectedFilter, queryTersaring, tahunTerpilih, jumlahFilm) {
+        value = repository.jumlahCocok(selectedFilter, queryTersaring, tahunTerpilih)
+    }
+    val jumlahTampil = if (modeFavorit) favoritTersaring.size else jumlahCocok
 
     // Peta film dan pemilik episode dibangun DI LUAR main thread; keduanya
     // dipakai baris "Lanjutkan menonton".
-    val peta by produceState(PetaFilm(), movies) {
-        value = withContext(Dispatchers.Default) {
-            PetaFilm(byId = movies.associateBy { it.id })
-        }
+    // Dulu ini meng-associateBy SELURUH 51 ribu film hanya untuk baris
+    // "Lanjutkan menonton". Sekarang hanya id yang benar-benar ada di riwayat
+    // yang dicari — paling banyak sekitar 48 entri.
+    val petaResume by produceState(emptyMap<String, Movie>(), history) {
+        value = history.take(24)
+            .flatMap { h -> listOfNotNull(h.movieId, pemilikEpisode(h.movieId)) }
+            .distinct()
+            .mapNotNull { id -> repository.filmSatu(id)?.let { id to it } }
+            .toMap()
     }
-    val resume = remember(history, peta) {
+    val resume = remember(history, petaResume) {
         history.filter { it.durationMs <= 0L || it.positionMs < it.durationMs - 15_000L }
             .mapNotNull { h ->
-                peta.byId[h.movieId]?.let { Triple(it, null as String?, h) }
-                    ?: pemilikEpisode(h.movieId)?.let { peta.byId[it] }?.let { Triple(it, h.movieId, h) }
+                petaResume[h.movieId]?.let { Triple(it, null as String?, h) }
+                    ?: pemilikEpisode(h.movieId)?.let { petaResume[it] }?.let { Triple(it, h.movieId, h) }
             }
             .distinctBy { it.first.id }
             .take(12)
     }
 
     val adaSaringan = query.isNotBlank() || tahunTerpilih != null
-    val bawaan = selectedFilter == "all" && !adaSaringan && movies.isNotEmpty()
+    val bawaan = selectedFilter == "all" && !adaSaringan && jumlahFilm > 0
     val etalaseSerial = selectedFilter == "series" && !adaSaringan && deretSerial.isNotEmpty()
 
     // SATU LazyColumn untuk kedua tampilan. Dulu tampilan bawaan dan hasil
@@ -516,13 +507,13 @@ fun MoviesScreen(embedded: Boolean = false) {
                     onBuka = { app.navigate(Routes.movieDetail(it.id)) },
                 )
             }
-        } else if ((refreshing || searchingRemote) && visibleMovies.isEmpty()) {
+        } else if ((refreshing || searchingRemote) && jumlahTampil == 0) {
             item {
                 Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = BytifyColors.GoldDeep)
                 }
             }
-        } else if (visibleMovies.isEmpty()) {
+        } else if (jumlahTampil == 0) {
             item {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -549,19 +540,35 @@ fun MoviesScreen(embedded: Boolean = false) {
         } else {
             item(key = "jumlah") {
                 Text(
-                    "${visibleMovies.size} film",
+                    "$jumlahTampil film",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 4.dp),
                 )
             }
-            items(visibleMovies.distinctBy { it.id }, key = { it.id }) { film ->
-                MovieRow(
-                    movie = film,
-                    isFavorite = film.id in favoriteIds,
-                    onClick = { app.navigate(Routes.movieDetail(film.id)) },
-                    onFavorite = { scope.launch { repository.setFavorite(film, film.id !in favoriteIds) } },
-                )
+            if (modeFavorit) {
+                items(favoritTersaring.distinctBy { it.id }, key = { it.id }) { film ->
+                    MovieRow(
+                        movie = film,
+                        isFavorite = film.id in favoriteIds,
+                        onClick = { app.navigate(Routes.movieDetail(film.id)) },
+                        onFavorite = { scope.launch { repository.setFavorite(film, film.id !in favoriteIds) } },
+                    )
+                }
+            } else {
+                // Hanya baris di sekitar posisi gulir yang ditahan; itulah yang
+                // membuat memori berhenti bergantung pada jumlah film.
+                items(count = halaman.itemCount, key = halaman.itemKey { it.id }) { indeks ->
+                    val film = halaman[indeks]
+                    if (film != null) {
+                        MovieRow(
+                            movie = film,
+                            isFavorite = film.id in favoriteIds,
+                            onClick = { app.navigate(Routes.movieDetail(film.id)) },
+                            onFavorite = { scope.launch { repository.setFavorite(film, film.id !in favoriteIds) } },
+                        )
+                    }
+                }
             }
         }
     }
@@ -573,42 +580,8 @@ private const val BATAS_DERET_GENRE = 12
 /** Serial jauh lebih sedikit daripada film, jadi ambangnya lebih rendah. */
 private const val BATAS_DERET_SERIAL = 4
 
-/**
- * Kelompokkan judul menurut genre, terbaru dan ternilai tinggi lebih dulu.
- * Dipanggil dari Dispatchers.Default: untuk 25 ribu film ini pemindaian penuh.
- */
-private fun kelompokkanGenre(daftar: List<Movie>, batas: Int = BATAS_DERET_GENRE): List<DeretGenre> {
-    val ember = HashMap<String, MutableList<Movie>>()
-    daftar.forEach { film ->
-        // Genre di-DISTINCT per film. Katalog bisa memuat nama genre yang sama
-        // dua kali (TMDB sesekali memulangkan genre_ids kembar); tanpa saringan
-        // ini film yang sama masuk dua kali ke satu deret, dan Compose menolak
-        // dua item berkunci sama dengan melempar IllegalArgumentException —
-        // terbukti mematikan aplikasi saat katalog Indonesia ditambahkan.
-        film.genres.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-            .forEach { genre -> ember.getOrPut(genre) { mutableListOf() }.add(film) }
-    }
-    return ember.entries
-        .filter { it.value.size >= batas }
-        .sortedByDescending { it.value.size }
-        .map { (genre, isi) ->
-            DeretGenre(
-                genre = genre,
-                film = isi.sortedWith(
-                    compareByDescending<Movie> { it.releaseYear ?: 0 }
-                        .thenByDescending { it.rating ?: 0.0 },
-                ).take(ISI_DERET_GENRE),
-                jumlah = isi.size,
-            )
-        }
-}
-
 /** Banyak poster yang ditampilkan dalam satu deret mendatar. */
 private const val ISI_DERET_GENRE = 20
-
-private data class PetaFilm(
-    val byId: Map<String, Movie> = emptyMap(),
-)
 
 /**
  * Menurunkan id SERIAL dari id EPISODE tanpa menyimpan daftar episode di

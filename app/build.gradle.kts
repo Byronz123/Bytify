@@ -117,6 +117,11 @@ dependencies {
     implementation("androidx.room:room-runtime:2.7.2")
     implementation("androidx.room:room-ktx:2.7.2")
     ksp("androidx.room:room-compiler:2.7.2")
+    // Paging 3: daftar film berhenti ditahan utuh di memori. Daftar 51.015
+    // film memuncak di 101 MB pada Galaxy A36 yang batas heap-nya 256 MB.
+    implementation("androidx.room:room-paging:2.7.2")
+    implementation("androidx.paging:paging-runtime-ktx:3.3.6")
+    implementation("androidx.paging:paging-compose:3.3.6")
 
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.palette:palette-ktx:1.0.0")

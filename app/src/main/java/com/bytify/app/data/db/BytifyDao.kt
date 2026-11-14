@@ -2,6 +2,7 @@ package com.bytify.app.data.db
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.paging.PagingSource
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
@@ -195,6 +196,13 @@ interface BytifyDao {
 
     @Query("SELECT * FROM movies WHERE id = :id LIMIT 1")
     fun movie(id: String): Flow<MovieEntity?>
+
+    /**
+     * Versi sekali-ambil. Dipakai untuk pencarian bertitik dari id, yang
+     * menggantikan peta 51 ribu entri hasil associateBy di MoviesScreen.
+     */
+    @Query("SELECT * FROM movies WHERE id = :id LIMIT 1")
+    suspend fun movieSekali(id: String): MovieEntity?
 
     @Query(
         """SELECT * FROM movies
@@ -395,4 +403,171 @@ interface BytifyDao {
 
     @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM watch_titles")
     suspend fun lastWatchSync(): Long
+
+    // --- Daftar film tanpa menahan semuanya di memori --------------------
+    //
+    // Semua di bawah ini menggantikan operasi atas daftar UTUH di
+    // MoviesScreen. Daftar 51.015 film memuncak di 101 MB pada Galaxy A36
+    // yang batas heap-nya 256 MB, dan selama masih ada SATU pemakai yang
+    // butuh daftar utuh, memori itu tetap terpakai — jadi kesembilan
+    // pemakaiannya harus pindah, bukan sebagian.
+
+    @Upsert
+    suspend fun upsertMovieGenres(rows: List<MovieGenreEntity>)
+
+    /** Buang baris genre milik film yang sudah tidak ada. */
+    @Query("DELETE FROM movie_genres WHERE movieId NOT IN (SELECT id FROM movies)")
+    suspend fun pruneMovieGenres()
+
+    @Query("SELECT COUNT(*) FROM movie_genres")
+    suspend fun jumlahMovieGenre(): Int
+
+    /**
+     * Genre beserta jumlah filmnya, hanya yang mencapai [batas].
+     * Menggantikan pengelompokan seluruh daftar di memori.
+     */
+    @Query(
+        """SELECT mg.genre AS genre, COUNT(*) AS jumlah
+           FROM movie_genres mg JOIN movies m ON m.id = mg.movieId
+           WHERE (:serial = 0 AND m.type <> 'series')
+              OR (:serial = 1 AND m.type = 'series')
+           GROUP BY mg.genre
+           HAVING COUNT(*) >= :batas
+           ORDER BY jumlah DESC, mg.genre COLLATE NOCASE""",
+    )
+    suspend fun genreTeratas(serial: Int, batas: Int): List<GenreJumlah>
+
+    /**
+     * Isi satu deret genre. Urutannya menyamai perbandingan lama:
+     * tahun terbaru dulu, lalu rating tertinggi; nilai null jatuh ke belakang.
+     */
+    @Query(
+        """SELECT m.* FROM movies m JOIN movie_genres mg ON mg.movieId = m.id
+           WHERE mg.genre = :genre
+             AND ((:serial = 0 AND m.type <> 'series')
+               OR (:serial = 1 AND m.type = 'series'))
+           ORDER BY (m.releaseYear IS NULL), m.releaseYear DESC,
+                    (m.rating IS NULL), m.rating DESC
+           LIMIT :batas""",
+    )
+    suspend fun filmPerGenre(genre: String, serial: Int, batas: Int): List<MovieEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM movies WHERE type = 'series')")
+    fun adaSerial(): Flow<Boolean>
+
+    @Query(
+        """SELECT DISTINCT releaseYear FROM movies
+           WHERE releaseYear IS NOT NULL ORDER BY releaseYear DESC""",
+    )
+    suspend fun tahunTersedia(): List<Int>
+
+    @Query(
+        """SELECT * FROM movies WHERE type <> 'series' AND rating > 0
+           ORDER BY rating DESC, (releaseYear IS NULL), releaseYear DESC LIMIT :batas""",
+    )
+    suspend fun ratingTertinggi(batas: Int): List<MovieEntity>
+
+    @Query(
+        """SELECT * FROM movies WHERE type <> 'series' AND releaseYear = :tahun
+           ORDER BY (rating IS NULL), rating DESC LIMIT :batas""",
+    )
+    suspend fun filmTahun(tahun: Int, batas: Int): List<MovieEntity>
+
+    // --- Halaman untuk grid; tidak pernah memuat seluruh hasil -----------
+    //
+    // Urutannya dipertahankan sama dengan movies(): updatedAt DESC lalu judul,
+    // supaya tampilan tidak berubah dari yang sudah dipakai pengguna.
+
+    /**
+     * Satu kueri berparameter untuk filter semua/Film/Serial, DIGABUNG dengan
+     * pencarian dan saringan tahun. Dibuat berparameter daripada belasan
+     * varian supaya urutan dan semantiknya tidak bisa melenceng antar varian.
+     *
+     * `tipe`: "" semua, "movie" bukan serial, "series" serial saja.
+     * `tahun`: null berarti tanpa saringan tahun.
+     *
+     * Pencarian mencakup judul DAN sinopsis. Pencarian per-genre yang dulu ada
+     * di memori TIDAK ditiru di sini — chip genre sudah menyediakan jalan yang
+     * lebih tepat, dan menambah JOIN ke setiap halaman membuatnya mahal.
+     */
+    @Query(
+        """SELECT * FROM movies
+           WHERE (:kueri = '' OR title LIKE '%' || :kueri || '%'
+                             OR overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR releaseYear = :tahun)
+             AND (:tipe = ''
+               OR (:tipe = 'movie' AND type <> 'series')
+               OR (:tipe = 'series' AND type = 'series'))
+           ORDER BY updatedAt DESC, title COLLATE NOCASE""",
+    )
+    fun halamanUmum(kueri: String, tahun: Int?, tipe: String): PagingSource<Int, MovieEntity>
+
+    @Query(
+        """SELECT m.* FROM movies m JOIN movie_genres mg ON mg.movieId = m.id
+           WHERE mg.genre = :genre
+             AND ((:serial = 0 AND m.type <> 'series')
+               OR (:serial = 1 AND m.type = 'series'))
+             AND (:kueri = '' OR m.title LIKE '%' || :kueri || '%'
+                              OR m.overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR m.releaseYear = :tahun)
+           ORDER BY m.updatedAt DESC, m.title COLLATE NOCASE""",
+    )
+    fun halamanGenre(
+        genre: String,
+        serial: Int,
+        kueri: String,
+        tahun: Int?,
+    ): PagingSource<Int, MovieEntity>
+
+    /** Urutannya beda (rating dulu), jadi tidak bisa digabung ke halamanUmum. */
+    @Query(
+        """SELECT * FROM movies
+           WHERE type <> 'series' AND rating > 0
+             AND (:kueri = '' OR title LIKE '%' || :kueri || '%'
+                              OR overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR releaseYear = :tahun)
+           ORDER BY rating DESC, title COLLATE NOCASE""",
+    )
+    fun halamanRating(kueri: String, tahun: Int?): PagingSource<Int, MovieEntity>
+
+    /** Jumlah film; menggantikan `movies.isNotEmpty()` di layar. */
+    @Query("SELECT COUNT(*) FROM movies")
+    fun jumlahFilmAlir(): Flow<Int>
+
+    // Hitungan yang SEPADAN dengan ketiga kueri halaman di atas. Perlu karena
+    // `itemCount` milik Paging hanya menghitung yang sudah dimuat, sementara
+    // label "N film" harus menyebut seluruh yang cocok — kalau tidak, labelnya
+    // berubah sendiri sambil pengguna menggulir.
+
+    @Query(
+        """SELECT COUNT(*) FROM movies
+           WHERE (:kueri = '' OR title LIKE '%' || :kueri || '%'
+                             OR overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR releaseYear = :tahun)
+             AND (:tipe = ''
+               OR (:tipe = 'movie' AND type <> 'series')
+               OR (:tipe = 'series' AND type = 'series'))""",
+    )
+    suspend fun jumlahUmum(kueri: String, tahun: Int?, tipe: String): Int
+
+    @Query(
+        """SELECT COUNT(*) FROM movies m JOIN movie_genres mg ON mg.movieId = m.id
+           WHERE mg.genre = :genre
+             AND ((:serial = 0 AND m.type <> 'series')
+               OR (:serial = 1 AND m.type = 'series'))
+             AND (:kueri = '' OR m.title LIKE '%' || :kueri || '%'
+                              OR m.overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR m.releaseYear = :tahun)""",
+    )
+    suspend fun jumlahGenre(genre: String, serial: Int, kueri: String, tahun: Int?): Int
+
+    @Query(
+        """SELECT COUNT(*) FROM movies
+           WHERE type <> 'series' AND rating > 0
+             AND (:kueri = '' OR title LIKE '%' || :kueri || '%'
+                              OR overview LIKE '%' || :kueri || '%')
+             AND (:tahun IS NULL OR releaseYear = :tahun)""",
+    )
+    suspend fun jumlahRating(kueri: String, tahun: Int?): Int
+
 }

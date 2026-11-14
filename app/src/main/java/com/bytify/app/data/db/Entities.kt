@@ -328,3 +328,35 @@ data class WatchAliasEntity(
     val type: String,
 )
 
+/**
+ * Genre per film sebagai BARIS, bukan JSON di dalam kolom.
+ *
+ * Perlu karena deret genre di layar Film dulu dibangun dengan mengelompokkan
+ * SELURUH daftar film di memori — dan daftar utuh itulah yang memuncak di
+ * 101 MB pada Galaxy A36 (batas heap 256 MB). Selama masih ada satu pemakai
+ * yang butuh daftar utuh, memori itu tetap terpakai, jadi deret genre harus
+ * ikut pindah ke SQL atau Paging tidak memberi manfaat apa pun.
+ *
+ * Kunci utamanya GABUNGAN (movieId, genre), dan itu disengaja: genre kembar
+ * jadi mustahil secara struktur. Dulu katalog bisa memulangkan nama genre yang
+ * sama dua kali untuk satu film, membuat film itu masuk dua kali ke satu deret,
+ * dan Compose menolak dua item berkunci sama dengan IllegalArgumentException —
+ * terbukti mematikan aplikasi saat katalog Indonesia ditambahkan. Sekarang
+ * skema yang menjaganya, bukan penyaringan di kode.
+ */
+@Entity(
+    tableName = "movie_genres",
+    primaryKeys = ["movieId", "genre"],
+    indices = [Index(value = ["genre"])],
+)
+data class MovieGenreEntity(
+    val movieId: String,
+    val genre: String,
+)
+
+
+/** Satu genre beserta jumlah filmnya; proyeksi untuk deret genre. */
+data class GenreJumlah(
+    val genre: String,
+    val jumlah: Int,
+)

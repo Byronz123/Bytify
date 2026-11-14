@@ -258,3 +258,14 @@ data class SubtitlePilihanDto(
     /** Subtitle untuk penonton dengan gangguan pendengaran. */
     val hearingImpaired: Boolean = false,
 )
+
+/**
+ * Satu deret genre siap tampil. Dulu dibentuk di MoviesScreen dengan
+ * mengelompokkan seluruh daftar film di memori; sekarang dibangun dari SQL.
+ */
+data class DeretGenre(
+    val genre: String,
+    val film: List<Movie>,
+    val jumlah: Int,
+)
+

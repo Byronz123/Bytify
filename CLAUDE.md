@@ -399,6 +399,56 @@ berawalan "series-". Ketersediaannya tidak terpengaruh: itu per-acara.
 Kalau nanti mau dibuka, yang dibutuhkan: simpan `number_of_seasons` saat panen,
 lalu izinkan subtitle hanya untuk acara bermusim tunggal.
 
+### 3l. Daftar film TIDAK BOLEH ditahan utuh di memori
+
+`MovieRepository.movies` dulu StateFlow yang menahan SELURUH katalog. TERUKUR
+di Galaxy A36 (batas heap 256 MB), kondisi identik, sudah mengendap:
+
+| Metrik | Sebelum | Sesudah |
+|---|---|---|
+| Dalvik alloc mengendap | 54 MB | **10 MB** |
+| Dalvik alloc puncak (DB siap) | 101 MB | **22 MB** |
+| TOTAL PSS | 218 MB | 195 MB |
+| Native heap | 18 MB | 27 MB (NAIK) |
+
+StateFlow menahan nilai terakhirnya walau tidak ada lagi yang berlangganan,
+jadi sekali terisi, 51.015 objek Movie hidup selamanya. Itu jalan yang pernah
+mematikan aplikasi dengan OutOfMemoryError.
+
+**Sifat yang wajib dipahami: ini tidak bisa dikerjakan separuh.** Selama ada
+SATU pemakai yang butuh daftar utuh, memorinya tetap terpakai penuh. Di
+MoviesScreen ada SEMBILAN pemakaian, dan kesembilannya harus pindah sekaligus
+atau hasilnya nol.
+
+Penggantinya:
+- `halaman(filter, kueri, tahun)` — Paging 3, tiga kueri BERPARAMETER (umum /
+  genre / rating), bukan belasan varian, supaya urutan dan semantiknya tidak
+  melenceng antar varian.
+- `deretGenre()` dari tabel `movie_genres` (112.029 baris di perangkat).
+- `ratingTertinggi()`, `filmTahun()`, `tahunTersedia()`, `adaSerial`,
+  `jumlahFilm` — semuanya SQL.
+- `jumlahCocok()` untuk label "N film": `itemCount` Paging hanya menghitung
+  yang sudah dimuat, jadi labelnya akan berubah sambil pengguna menggulir.
+- Baris "Lanjutkan menonton" memakai peta kecil (maks ~48 entri) hasil
+  pencarian per-id, bukan `associateBy` atas 51 ribu film.
+
+`movie_genres` berkunci utama GABUNGAN (movieId, genre): genre kembar jadi
+mustahil secara struktur. Dulu katalog bisa memulangkan genre yang sama dua
+kali, film itu masuk dua kali ke satu deret, dan Compose melempar
+IllegalArgumentException — terbukti mematikan aplikasi saat katalog Indonesia
+ditambahkan. Sekarang skema yang menjaganya.
+
+MIGRATION_11_12 membiarkan tabelnya KOSONG: mengurai genresJson untuk 51 ribu
+baris di dalam migrasi akan menahan pembukaan database tepat di layar pertama.
+Isinya menyusul pada sinkron berikutnya; sampai itu terjadi deret genre tampil
+kosong dan tidak ada yang rusak.
+
+**Yang BELUM selesai, dan ini ceiling berikutnya:** saat katalog disinkron
+penuh, Dalvik masih memuncak ~95 MB. Itu BUKAN masalah yang diperbaiki di
+sini — penyebabnya `decodeFromStream` tetap membentuk seluruh daftar DTO di
+memori sebelum menulis ke Room. Memperbaikinya butuh menulis per potongan
+sambil mengurai, bukan setelah.
+
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 
 - `sourceUrl` dipakai sebagai **Referer**; tanpa ini embed mengalihkan ke beranda.

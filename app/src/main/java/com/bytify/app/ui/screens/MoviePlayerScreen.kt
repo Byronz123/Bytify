@@ -390,6 +390,44 @@ private const val GATE_BYPASS_JS = """
   }
   [4500, 10000, 15000].forEach(function(ms){ setTimeout(cekTakAdaSumber, ms); });
 
+  // ---- Penjaga tinggi frame ----
+  //
+  // Jebakan yang sudah tercatat di keputusan 4, tetapi kali ini pada iframe
+  // milik HALAMAN PENYEDIA, bukan pembungkus kita. Terukur di Galaxy A36 pada
+  // pemutar anime anikai: videonya benar-benar berjalan (1920x1080, suaranya
+  // terdengar) tetapi kotaknya 384x0 dan jendela frame-nya 384x0 — tinggi
+  // persen di dalam frame itu tidak pernah teresolusi, jadi yang terlihat
+  // layar hitam bersuara.
+  //
+  // Pembungkus kita punya bytifyFit() untuk ini, tetapi jalur LANGSUNG memang
+  // tidak memakai pembungkus, sehingga tidak ada yang menetapkan tingginya.
+  // Di sini tingginya dipaksa dalam PIKSEL dari dokumen induk, karena ukuran
+  // sebuah iframe hanya bisa ditetapkan dari induknya.
+  function pastikanTinggi(){
+    try {
+      var h = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (h < 2) return;
+      var de = document.documentElement, b = document.body;
+      if (de && de.clientHeight < 2) de.style.minHeight = h + 'px';
+      if (b && b.clientHeight < 2) b.style.minHeight = h + 'px';
+      var fr = document.querySelectorAll('iframe');
+      for (var i = 0; i < fr.length; i++) {
+        if (fr[i].offsetHeight < 2 && fr[i].offsetWidth > 2) {
+          fr[i].style.height = h + 'px';
+          fr[i].style.minHeight = h + 'px';
+        }
+      }
+      // Elemen video yang sudah punya isi tetapi tingginya 0 diberi tinggi
+      // menurut rasio aslinya — kalau induknya sendiri yang tak bertinggi.
+      var v = document.querySelector('video');
+      if (v && v.videoWidth > 0 && v.clientHeight < 2 && v.clientWidth > 2) {
+        v.style.height = Math.round(v.clientWidth * v.videoHeight / v.videoWidth) + 'px';
+      }
+    } catch (e) {}
+  }
+  setInterval(pastikanTinggi, 400);
+  window.addEventListener('resize', pastikanTinggi);
+
   // ---- Deteksi KEMAJUAN, bukan sekadar "sudah berputar" ----
   //
   // Terukur pada penyedia sungguhan: vidlink merakit alirannya lewat
@@ -417,7 +455,21 @@ private const val GATE_BYPASS_JS = """
                       (v.buffered && v.buffered.length > 0);
         if (adaData) {
           sudahSiap = true;
-          console.log('BYTIFY_SIAP rs=' + v.readyState);
+          // Geometri ikut dilaporkan sekali. Layar hitam yang tetap
+          // bersuara punya dua sebab yang sangat berbeda: elemen videonya
+          // berukuran 0 piksel (masalah tata letak), atau ia punya ukuran
+          // tetapi permukaannya tidak terkomposit (masalah perenderan).
+          // Tanpa angka ini keduanya terlihat sama persis.
+          var r = {w:0,h:0,x:0,y:0};
+          try { var b = v.getBoundingClientRect(); r = {w:Math.round(b.width),h:Math.round(b.height),x:Math.round(b.left),y:Math.round(b.top)}; } catch (e) {}
+          var st = {};
+          try { var cs = getComputedStyle(v); st = {d:cs.display,vis:cs.visibility,op:cs.opacity}; } catch (e) {}
+          console.log('BYTIFY_SIAP rs=' + v.readyState +
+            ' vid=' + v.videoWidth + 'x' + v.videoHeight +
+            ' kotak=' + r.w + 'x' + r.h + '@' + r.x + ',' + r.y +
+            ' gaya=' + st.d + '/' + st.vis + '/' + st.op +
+            ' layar=' + window.innerWidth + 'x' + window.innerHeight +
+            ' frame=' + (window.top === window.self ? 'utama' : 'anak'));
         }
       }
     } catch (e) {}
@@ -1591,7 +1643,14 @@ private fun EmbedVideoStage(
                             // menjalankannya di sana merusak pemutar yang
                             // sebetulnya sehat.
                             if (!langsung) view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
-                            view?.let { ketukOtomatis(it, sudahMain) }
+                            // Ketukan otomatis juga hanya untuk halaman
+                            // bergerbang iklan. Pemutar pihak ketiga berjalan
+                            // sendiri (mediaPlaybackRequiresUserGesture sudah
+                            // dimatikan), jadi ketukan di sana tidak memulai
+                            // apa pun — ia justru MEMBUKA menu pemutarnya.
+                            // Terlihat di A36: menu subtitle anikai terbuka
+                            // menutupi video yang sedang berjalan.
+                            if (!langsung) view?.let { ketukOtomatis(it, sudahMain) }
                         }
 
                         override fun onReceivedError(

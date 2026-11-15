@@ -18,6 +18,10 @@ on:
       - backend/data/series_catalog.json
       - backend/data/indonesia_catalog.json
       - backend/data/anime_catalog.json
+      # Lapisan server anime (anikai). Tanpa baris ini, menyegarkan lapisan itu
+      # saja tidak pernah memicu terbit — dan lapisan inilah yang paling sering
+      # perlu disegarkan, karena seal-nya bisa berubah di sisi penyedia.
+      - backend/data/anime_servers.json
       - backend/data/watch_catalog.json
       - backend/data/live_tv_database.json
       - backend/api/**

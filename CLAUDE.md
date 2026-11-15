@@ -697,6 +697,32 @@ sesi, dan hanya dibaca saat pemutar anime dibuka — jadi ditahan di memori
 `MovieRepository` di belakang Mutex. Menyimpannya ke Room berarti satu tabel
 dan satu migrasi baru untuk data yang tidak perlu bertahan.
 
+**Anikai didahulukan sebelum framextv untuk anime, dan itu terukur.** Dua anime
+yang diuji di A36 (Jujutsu Kaisen dan Renegade Immortal) sama-sama gagal di
+framextv sampai ambang waktu habis, sementara anikai memutar keduanya —
+Jujutsu Kaisen mulai berjalan **4,5 detik** setelah tombol ditekan, dan
+framextv tidak disentuh sama sekali. framextv TIDAK dibuang, hanya turun
+urutan: 2.320 judul anikai yang tidak terjodohkan masih mengandalkannya.
+
+**`BYTIFY_SIAP` mensyaratkan DATA, bukan sekadar src yang menempel.** Terukur:
+framextv memasang `src` lalu diam dengan `readyState 0` karena backend-nya
+membalas 429 — dan dengan syarat longgar, server mati seperti itu justru
+DIBERI kesabaran 45 detik, dua kali berturut-turut. "Punya src" bukan
+kemajuan; "punya data" baru kemajuan.
+
+**Jumlah episode anime: disimpan sebagian, dilengkapi aplikasi.** Katalog
+memangkas daftar episode (`BATAS_EPISODE`) supaya muat di 25 MiB, dan
+akibatnya Jujutsu Kaisen tampil **8 episode padahal aslinya 24** — berlaku
+untuk 6.297 judul, yaitu **124.248 episode** yang tidak pernah sampai ke
+pengguna. Sekarang katalog membawa `episodeCount` (jumlah sebenarnya) dan
+`lengkapiEpisode()` di MovieModels.kt membentuk sisanya: URL episode
+berpola `.../embed/anime/<id>/<nomor>`, jadi bisa DIHITUNG. Polanya diturunkan
+dari episode terakhir yang memang ada di katalog, bukan ditanam di kode, supaya
+ikut berganti kalau pembangun katalog berganti cermin. Dibatasi
+`BATAS_LENGKAPI_EPISODE` karena daftar ini dibentuk saat sinkron, dan puncak
+memori sinkron pernah menyentuh plafon heap (3m); terukur di A36 sesudahnya:
+Dalvik mengendap 26,5 MB, nol FATAL EXCEPTION.
+
 **Kunci proses tunggal di `anikai_servers.py` jangan dilepas.** Dua pemanen
 pernah berjalan bersamaan dan saling menimpa berkas sementara yang sama,
 sehingga `os.replace()` gagal dan hasil panennya hilang — jebakan yang sama

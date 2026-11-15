@@ -37,6 +37,12 @@ data class MovieDto(
     val subtitles: List<MovieSubtitleDto> = emptyList(),
     val license: String? = null,
     val episodes: List<EpisodeDto> = emptyList(),
+    /**
+     * Jumlah episode SEBENARNYA, kalau [episodes] sengaja dipotong di katalog.
+     * Dipakai anime: daftarnya dipangkas agar berkasnya muat di batas 25 MiB,
+     * dan sisanya dilengkapi di sini.
+     */
+    val episodeCount: Int? = null,
 )
 
 /** Satu episode serial; setiap episode punya URL video dan subtitle sendiri. */
@@ -124,11 +130,61 @@ fun MovieDto.toMovie(): Movie = Movie(
     license = license?.trim()?.takeIf(String::isNotEmpty),
     sourceUrl = sourceUrl.cleanUrlOrNull(),
     servers = servers.filter { it.url.cleanUrlOrNull() != null }.distinctBy { it.url },
-    episodes = episodes
-        .filter { it.id.isNotBlank() && it.videoUrl.cleanUrlOrNull() != null }
-        .map { it.copy(subtitles = it.subtitles.filter { s -> s.url.cleanUrlOrNull() != null }) }
-        .distinctBy { it.id },
+    episodes = lengkapiEpisode(
+        id.trim(),
+        episodes
+            .filter { it.id.isNotBlank() && it.videoUrl.cleanUrlOrNull() != null }
+            .map { it.copy(subtitles = it.subtitles.filter { s -> s.url.cleanUrlOrNull() != null }) }
+            .distinctBy { it.id },
+        episodeCount,
+    ),
 )
+
+/** Sebanyak-banyaknya episode yang dilengkapi sendiri untuk satu judul. */
+private const val BATAS_LENGKAPI_EPISODE = 500
+
+/**
+ * Melengkapi daftar episode yang sengaja dipotong di katalog.
+ *
+ * Katalog anime memangkas daftar episodenya supaya berkasnya muat di batas
+ * keras 25 MiB Cloudflare Pages. Akibatnya Jujutsu Kaisen tampil 8 episode
+ * padahal aslinya 24 — dan itu berlaku untuk 6.297 judul, yaitu 124.248
+ * episode yang tidak pernah sampai ke pengguna.
+ *
+ * URL episode berpola `.../embed/anime/<id>/<nomor>`, jadi sisanya bisa
+ * DIHITUNG, bukan disimpan. Polanya diturunkan dari episode pertama yang
+ * memang ada di katalog — bukan ditanam di sini — supaya kalau pembangun
+ * katalog berganti cermin, yang di sini ikut berganti sendiri.
+ *
+ * Dibatasi [BATAS_LENGKAPI_EPISODE] karena daftar ini dibentuk saat sinkron
+ * katalog, dan puncak memori sinkron adalah hal yang sudah pernah menyentuh
+ * plafon heap di Galaxy A36 (lihat 3m).
+ */
+private fun lengkapiEpisode(
+    idFilm: String,
+    tersimpan: List<EpisodeDto>,
+    jumlah: Int?,
+): List<EpisodeDto> {
+    val target = jumlah?.coerceAtMost(BATAS_LENGKAPI_EPISODE) ?: return tersimpan
+    if (target <= tersimpan.size || tersimpan.isEmpty()) return tersimpan
+    val contoh = tersimpan.last()
+    val alamat = contoh.videoUrl?.takeIf { it.isNotBlank() } ?: return tersimpan
+    // ".../embed/anime/113415/8" -> ".../embed/anime/113415"
+    val dasar = alamat.substringBeforeLast('/')
+    if (dasar.isBlank() || dasar == alamat) return tersimpan
+
+    val akhiran = idFilm.ifBlank { "anime" }
+    val tambahan = (tersimpan.size + 1..target).map { nomor ->
+        EpisodeDto(
+            id = "$akhiran-e$nomor",
+            title = "Episode $nomor",
+            season = contoh.season,
+            episode = nomor,
+            videoUrl = "$dasar/$nomor",
+        )
+    }
+    return tersimpan + tambahan
+}
 
 /**
  * Penanda URL sampah: video kampanye anti-judi dan iklan yang disisipkan sumber

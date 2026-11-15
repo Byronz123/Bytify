@@ -172,7 +172,11 @@ private fun isEmbedStreamUrl(url: String): Boolean {
         lower.contains("vidcore") ||
         lower.contains("vidlink") ||
         lower.contains("vidsrc") ||
-        lower.contains("autoembed")
+        lower.contains("autoembed") ||
+        // Pemutar anime anikai beralamat /watch#<seal>... — tidak memuat kata
+        // "embed" sama sekali, jadi tanpa baris ini ia terbaca sebagai media
+        // langsung dan ExoPlayer mencoba memutar dokumen HTML.
+        lower.contains("anikai")
 }
 
 private val AD_DOMAINS = setOf(
@@ -403,10 +407,15 @@ private const val GATE_BYPASS_JS = """
     try {
       var v = cariVideo();
       if (v && !sudahSiap) {
-        var adaSumber = !!(v.src || v.currentSrc || v.srcObject);
+        // Syaratnya DATA yang benar-benar masuk, bukan sekadar sumber yang
+        // menempel. Terukur di Galaxy A36: framextv memasang src lalu diam
+        // dengan readyState 0 karena backend-nya membalas HTTP 429 — dan
+        // dengan syarat yang longgar, server mati seperti itu justru DIBERI
+        // kesabaran 45 detik, dua kali berturut-turut. "Punya src" bukan
+        // kemajuan; "punya data" baru kemajuan.
         var adaData = (v.readyState >= 2) ||
                       (v.buffered && v.buffered.length > 0);
-        if (adaSumber || adaData) {
+        if (adaData) {
           sudahSiap = true;
           console.log('BYTIFY_SIAP rs=' + v.readyState);
         }
@@ -704,6 +713,11 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             serverEkstra = listOfNotNull(
                 katalog?.let { serverAnikai(it, idAnilist, episode?.episode ?: 1) },
             )
+            Log.i(
+                EMBED_TAG,
+                "server anime: anilist=$idAnilist lapisan=${katalog?.titles?.size ?: -1} " +
+                    "hasil=${serverEkstra.size}",
+            )
             return@LaunchedEffect
         }
 
@@ -740,13 +754,36 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // Nama server yang sedang dipakai diambil dari katalog kalau ada, bukan
         // dilabeli "utama" begitu saja — supaya ia ikut terhitung sebagai
         // keluarga penyedia yang sama pada penyusunan di bawah.
+        // Untuk ANIME, server anikai didahulukan sebelum server katalog.
+        //
+        // Terukur di Galaxy A36, bukan preferensi: server katalog anime adalah
+        // framextv, dan keempat "cermin"-nya ternyata satu server yang sama
+        // (semua dialihkan ke framextv.cc, backend api.framextv.tech yang
+        // membalas HTTP 429). Dua anime yang diuji — Jujutsu Kaisen dan
+        // Renegade Immortal — sama-sama gagal di sana sampai ambang waktu
+        // habis, sementara anikai memutar keduanya. Jujutsu Kaisen mulai
+        // berjalan 6 detik setelah tombol ditekan.
+        //
+        // framextv TIDAK dibuang, hanya turun urutan: ia tetap dicoba kalau
+        // anikai gagal, dan 2.320 judul anikai yang tidak terjodohkan tetap
+        // mengandalkannya.
+        val anime = movie.id.startsWith("anilist-")
+        val dahulukanEkstra = anime && serverEkstra.isNotEmpty()
+        if (dahulukanEkstra) {
+            serverEkstra.forEach { tambah(it.server, it.url, it.url) }
+        }
+        // Nama server yang sedang dipakai diambil dari katalog kalau ada, bukan
+        // dilabeli "utama" begitu saja — supaya ia ikut terhitung sebagai
+        // keluarga penyedia yang sama pada penyusunan di bawah.
         tambah(
             movie.servers.firstOrNull { it.url == videoUrl }?.server ?: "utama",
             videoUrl,
             movie.sourceUrl,
         )
         movie.servers.forEach { tambah(it.server, it.url, movie.sourceUrl) }
-        serverEkstra.forEach { tambah(it.server, it.url, it.url) }
+        if (!dahulukanEkstra) {
+            serverEkstra.forEach { tambah(it.server, it.url, it.url) }
+        }
 
         // Cermin dari penyedia yang SAMA didorong ke belakang antrean.
         //

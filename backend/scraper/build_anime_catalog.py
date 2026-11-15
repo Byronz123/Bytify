@@ -80,6 +80,15 @@ def ramping(a):
     hasil = {
         "id": a["id"],
         "type": "series",
+        # Jumlah episode SEBENARNYA, bukan yang tersimpan.
+        #
+        # Daftar di bawah tetap dipotong BATAS_EPISODE supaya berkas ini muat
+        # di batas keras 25 MiB, tetapi aplikasi MELENGKAPI sisanya sendiri:
+        # URL episode deterministik (.../embed/anime/<id>/<n>), jadi menyimpan
+        # satu baris per episode hanya menyalin ulang sesuatu yang bisa
+        # dihitung. Tanpa angka ini, Jujutsu Kaisen tampil 8 episode padahal
+        # aslinya 24 — terukur, dan berlaku untuk 6.297 judul lain.
+        "episodeCount": jumlah,
         "title": judul,
         "overview": _potong((a.get("overview") or "").strip()),
         "posterUrl": a.get("posterUrl"),

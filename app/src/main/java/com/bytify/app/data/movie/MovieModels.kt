@@ -238,6 +238,19 @@ data class AnimeServerDto(
     val seal: String = "",
     /** 0 berarti penyedia menyatakan judul ini belum punya sumber. */
     val server: Int = 0,
+    /**
+     * Nomor musim TMDB judul ini, bila bisa ditentukan dengan yakin.
+     *
+     * Dipakai untuk SUBTITLE, bukan untuk pemutaran. Katalog menomori semua
+     * episode anime sebagai musim 1, sehingga anime yang berbagi satu entri
+     * TMDB dengan musim lain terpaksa melewatkan subtitle (3j). Dengan angka
+     * ini permintaannya bisa menyebut musim yang benar, jadi subtitle —
+     * termasuk bahasa Indonesia — akhirnya sampai ke judul-judul itu.
+     *
+     * Null berarti musimnya tidak dapat dipastikan; penjaga lama tetap
+     * berlaku untuk judul seperti itu.
+     */
+    val season: Int? = null,
 )
 
 

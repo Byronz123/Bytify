@@ -721,13 +721,37 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // kita semuanya bernomor musim 1, jadi permintaannya akan memulangkan
         // subtitle musim yang salah. Chip ketersediaannya tetap tampil —
         // "ada di Netflix" benar untuk seluruh musim.
-        if (perEpisode && !ket.amanSubtitlePerEpisode(movie.id, tmdbId, tipeTmdb)) return@LaunchedEffect
+        // Musim TMDB yang BENAR untuk anime, kalau lapisan server anime
+        // mengetahuinya. Tanpa ini permintaannya memakai musim 1 untuk semua
+        // episode, dan anime yang berbagi satu entri TMDB dengan musim lain
+        // terpaksa dilewati — itulah sebabnya Jujutsu Kaisen tidak pernah
+        // punya pilihan subtitle Indonesia sama sekali.
+        var musim = episode?.season
+        if (perEpisode) {
+            val musimAnime = anilistIdDari(movie.id)?.let { idAnilist ->
+                runCatching { repository.serverAnime() }.getOrNull()
+                    ?.titles?.get(idAnilist.toString())?.season
+            }
+            if (musimAnime != null) {
+                musim = musimAnime
+            } else if (!ket.amanSubtitlePerEpisode(movie.id, tmdbId, tipeTmdb)) {
+                // Musimnya tidak dapat dipastikan: penjaga lama tetap berlaku,
+                // karena subtitle musim yang salah lebih buruk daripada tidak
+                // ada subtitle.
+                return@LaunchedEffect
+            }
+        }
 
         subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
             tmdbId = tmdbId,
             type = if (perEpisode) "episode" else "movie",
-            season = episode?.season,
+            season = musim,
             episode = episode?.episode,
+        )
+        Log.i(
+            EMBED_TAG,
+            "subtitle anime: tmdb=$tmdbId musim=$musim ep=${episode?.episode} " +
+                "hasil=${subtitlesJaring.size} bahasa=${subtitlesJaring.map { it.lang }}",
         )
     }
     // Subtitle dari katalog diutamakan; yang dari jaringan hanya menambah

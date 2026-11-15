@@ -394,9 +394,51 @@ def verifikasi():
     return 0
 
 
+def panen_judul_semua():
+    """
+    Judul Inggris untuk SELURUH anime di katalog, bukan hanya kandidat TMDB.
+
+    `--judul` hanya memanen id yang ikut dalam pemetaan TMDB (7.577 judul),
+    padahal katalognya 13.094. Akibatnya terukur: 7.337 anime tidak punya
+    judul Inggris sama sekali, dan karena anikai menamai judulnya dalam
+    bahasa Inggris, judul-judul itu MUSTAHIL terjodohkan dengan lapisan
+    server anime — berapa pun bagusnya aturan pencocokan.
+
+    Hasilnya DIGABUNG, bukan menimpa: judul yang sudah ada dipertahankan,
+    sehingga mode ini aman dijalankan ulang kapan saja.
+    """
+    anime = muat_anime()
+    ids = sorted({int(x["anilistId"]) for x in anime if x.get("anilistId")})
+    lama = {}
+    if os.path.exists(SUMBER_JUDUL):
+        try:
+            with open(SUMBER_JUDUL, encoding="utf-8") as f:
+                lama = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            lama = {}
+    kurang = [i for i in ids if not (lama.get(str(i)) or {}).get("english")]
+    print("[judul] katalog %d anime; %d sudah punya judul Inggris; "
+          "%d akan dipanen" % (len(ids), len(ids) - len(kurang), len(kurang)))
+    if not kurang:
+        return 0
+
+    baru = ambil_judul_anilist(kurang)
+    lama.update(baru)
+    sementara = SUMBER_JUDUL + ".tmp"
+    with open(sementara, "w", encoding="utf-8") as f:
+        json.dump(lama, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(sementara, SUMBER_JUDUL)
+    punya = sum(1 for v in lama.values() if v.get("english"))
+    print("[judul] %d judul tersimpan (%d punya judul Inggris) -> %s"
+          % (len(lama), punya, SUMBER_JUDUL))
+    return 0
+
+
 def main():
     if "--buat-daftar" in sys.argv:
         return buat_daftar()
+    if "--judul-semua" in sys.argv:
+        return panen_judul_semua()
     if "--judul" in sys.argv:
         return panen_judul()
     if "--verifikasi" in sys.argv:

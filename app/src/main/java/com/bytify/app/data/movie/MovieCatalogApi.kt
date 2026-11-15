@@ -154,6 +154,19 @@ class MovieCatalogApi(
     suspend fun fetchAnimeCatalog(): MovieCatalogDto? = ambilKatalogTambahan("anime")
 
     /**
+     * Lapisan SERVER anime dari anikai, dikunci AniList id.
+     *
+     * Bukan katalog: tidak membawa judul, poster, maupun sinopsis, dan isinya
+     * tidak pernah masuk tabel `movies`. Hanya kunci pemutar — satu `seal` per
+     * judul — yang dipakai membentuk URL tiap episode saat tayang.
+     *
+     * Mengembalikan null bila berkasnya belum ada, agar APK lama tetap jalan.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    suspend fun fetchAnimeServers(): AnimeServerCatalogDto? =
+        ambilBerkasTambahan("anime-servers") { json.decodeFromStream<AnimeServerCatalogDto>(it) }
+
+    /**
      * Mengambil lapisan KETERSEDIAAN RESMI (data JustWatch lewat TMDB).
      *
      * Bukan katalog pemutaran: isinya daftar layanan sah di Indonesia per judul

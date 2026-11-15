@@ -155,6 +155,36 @@ private fun String?.cleanUrlOrNull(): String? = this
     }
 
 
+// --- Lapisan SERVER anime (anikai) ----------------------------------------
+//
+// Dikunci AniList id LANGSUNG, dan itulah nilainya: lapisan server turunan
+// berkunci TMDB id terpaksa dilewati untuk separuh anime karena AniList
+// memecah musim sementara TMDB menyatukannya (lihat 3j). Anikai memecah musim
+// dengan cara yang sama seperti AniList, jadi tidak ada ambiguitas musim sama
+// sekali dan penjaga itu tidak diperlukan di sini.
+//
+// Isinya satu `seal` per JUDUL, bukan per episode. URL tiap episode dibentuk
+// dari `pattern` saat tayang, jadi berapa pun episodenya tetap terjangkau
+// tanpa menyimpan satu baris per episode.
+
+@Serializable
+data class AnimeServerCatalogDto(
+    val player: String = "",
+    /** mis. "{player}/watch#{seal}.{episode}.{server}.{audio}". */
+    val pattern: String = "",
+    val audio: String = "sub",
+    /** AniList id (sebagai teks, karena kunci JSON) -> kunci pemutarnya. */
+    val titles: Map<String, AnimeServerDto> = emptyMap(),
+)
+
+@Serializable
+data class AnimeServerDto(
+    val seal: String = "",
+    /** 0 berarti penyedia menyatakan judul ini belum punya sumber. */
+    val server: Int = 0,
+)
+
+
 // --- Lapisan ketersediaan resmi (JustWatch lewat TMDB) ---------------------
 //
 // Bentuknya SENGAJA beda dari MovieCatalogDto: kuncinya `titles` dengan kamus

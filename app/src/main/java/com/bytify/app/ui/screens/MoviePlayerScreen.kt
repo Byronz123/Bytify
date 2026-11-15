@@ -83,6 +83,8 @@ import com.bytify.app.data.movie.Movie
 import com.bytify.app.data.movie.MovieServerDto
 import com.bytify.app.data.movie.MovieSubtitleDto
 import com.bytify.app.data.movie.isJunkMediaUrl
+import com.bytify.app.data.movie.anilistIdDari
+import com.bytify.app.data.movie.serverAnikai
 import com.bytify.app.data.movie.serverTambahan
 import com.bytify.app.ui.ModeFloating
 import com.bytify.app.ui.appState
@@ -688,6 +690,23 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // episode yang salah lebih buruk daripada tidak punya server cadangan.
     var serverEkstra by remember(playKey) { mutableStateOf<List<MovieServerDto>>(emptyList()) }
     LaunchedEffect(playKey) {
+        // Anime ditangani lebih dulu dan TIDAK lewat jalur TMDB id.
+        //
+        // Lapisan anikai dikunci AniList id langsung, sehingga musimnya sejalan
+        // dengan katalog kita dan penjaga ambiguitas musim tidak diperlukan —
+        // itu yang membuat anime akhirnya punya server cadangan, termasuk
+        // separuh judul yang selama ini terpaksa dilewati oleh penjaga itu.
+        // Terukur di A36: tanpa ini anime hanya punya framextv, yang keempat
+        // "cermin"-nya satu server dan membalas HTTP 429.
+        val idAnilist = anilistIdDari(movie.id)
+        if (idAnilist != null) {
+            val katalog = runCatching { repository.serverAnime() }.getOrNull()
+            serverEkstra = listOfNotNull(
+                katalog?.let { serverAnikai(it, idAnilist, episode?.episode ?: 1) },
+            )
+            return@LaunchedEffect
+        }
+
         val acuan = runCatching { app.container.ketersediaan.tmdbUntuk(movie.id) }.getOrNull()
             ?: return@LaunchedEffect
         val (tmdbId, tipe) = acuan

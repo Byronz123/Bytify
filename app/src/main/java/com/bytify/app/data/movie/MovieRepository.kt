@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -68,6 +70,28 @@ class MovieRepository(
         .stateIn(scope, SharingStarted.WhileSubscribed(TAHAN_MS, TAHAN_MS), emptyList())
 
     fun movie(id: String): Flow<Movie?> = dao.movie(id).map { it?.toMovie(json) }
+
+    /**
+     * Lapisan server anime (anikai), ditahan di memori setelah unduhan pertama.
+     *
+     * TIDAK disimpan ke Room, dan itu disengaja. Isinya satu seal per judul —
+     * sekitar 8.000 baris pendek — jadi jauh lebih kecil daripada tabel yang
+     * pernah bermasalah di 3l, sementara menyimpannya ke Room berarti satu
+     * tabel dan satu migrasi baru hanya untuk data yang umurnya seumur sesi.
+     * Hanya dibaca saat pemutar anime dibuka, jadi tidak pernah diunduh kalau
+     * pengguna tidak menonton anime sama sekali.
+     */
+    @Volatile
+    private var serverAnimeCache: AnimeServerCatalogDto? = null
+    private val kunciServerAnime = Mutex()
+
+    suspend fun serverAnime(): AnimeServerCatalogDto? {
+        serverAnimeCache?.let { return it }
+        return kunciServerAnime.withLock {
+            serverAnimeCache ?: runCatching { api.fetchAnimeServers() }.getOrNull()
+                ?.also { serverAnimeCache = it }
+        }
+    }
 
     fun search(query: String): Flow<List<Movie>> = dao.searchMovies(query.trim())
         .map { rows -> rows.map { it.toMovieRingkas(json) } }

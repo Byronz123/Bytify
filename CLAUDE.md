@@ -64,6 +64,11 @@ backend/scraper/tmdb_match.py          judul katalog LK21 -> TMDB id, KETAT:
                                        judul ternormalkan sama persis + tahun ±1,
                                        yang ambigu dilewati. Bisa dilanjutkan.
 backend/api/src/subtitles.mjs          proxy OpenSubtitles; kunci hanya di server
+backend/scraper/anikai_servers.py      panen SERVER anime dari anikai.org lewat
+                                       HTTP biasa (situsnya statis); satu seal
+                                       per judul. Ada kunci proses tunggal.
+backend/scraper/build_anime_servers.py anikai_database.json -> anime_servers.json;
+                                       jembatan judul -> AniList id, KETAT
 backend/scraper/probe_servers.py       mengukur penyedia embed berkunci TMDB id
                                        mana yang betul menjawab; menentukan
                                        URUTAN RUTE di ServerTambahan.kt
@@ -631,6 +636,71 @@ penyuntik subtitle, dan ketukan otomatis tidak diperlukan untuk YouTube dan
 hanya menambah risiko pada jalur yang sudah terbukti. `onRelease` memuat
 `about:blank` SEBELUM `destroy()`, tanpa itu suara trailer terus berbunyi
 setelah dialognya ditutup.
+
+### 3p. Lapisan SERVER anime dari anikai — satu seal per judul, bukan per episode
+
+**Kenapa anime butuh lapisan sendiri.** Terukur di Galaxy A36: anime adalah
+satu-satunya bagian katalog yang benar-benar kehabisan pilihan server.
+Keempat "cermin" framextv ternyata SATU server (semuanya dialihkan ke
+framextv.cc, backend `api.framextv.tech` yang membalas **HTTP 429**), dan
+server turunan berkunci TMDB id terpaksa dilewati untuk **51%** anime karena
+penjaga ambiguitas musim 3j — hanya 3.805 dari 7.724 anime beralias yang TMDB
+id-nya tidak dibagi dengan musim lain.
+
+Anikai dikunci **AniList id langsung**, jadi musimnya sejalan dengan katalog
+kita dan penjaga itu tidak diperlukan sama sekali.
+
+**scrape_anikai.js TIDAK dipakai, dan alasannya terukur.** Skrip itu dibangun
+untuk situs bergaya Zoro/HiAnime: menunggu Cloudflare, menggulir, lalu
+MENGKLIK tab server untuk memancing iframe. anikai.org bukan situs seperti itu
+— ia situs STATIS (Hugo):
+
+| Sumber | Isi |
+|---|---|
+| `/watch-sitemap.xml` | 8.006 URL anime, lengkap, satu permintaan |
+| `/episodes/<id>.json` | daftar episode, larik ringkas |
+| `/watch/<slug>-<id>/` | HTML yang memuat seluruh kunci pemutar |
+
+Tidak ada `/ajax/v2/episode/servers`, tidak ada gerbang Cloudflare, tidak ada
+yang perlu diklik. Jadi browser justru membuat panen lebih lambat DAN tidak
+lengkap: skrip lama berhenti di `ENRICH_DETAIL_LIMIT=80` judul dan hanya
+mengambil server episode pertama. `anikai_servers.py` memakai HTTP biasa dan
+menjangkau seluruh 8.006 judul. Metadatanya tetap dibuang sesuai 3f —
+`tmdbId`-nya hash buatan (7000000+), `imdbId` "tt"+padding, rating "8.2",
+tahun "2026".
+
+**Bentuk URL-nya dibaca dari kode situsnya sendiri** (`js/main.js`):
+
+```
+`${dataset.player}/watch#${dataset.seal}.${episode}.${server}.${audio}`
+```
+
+Karena nomor episode hanya DISISIPKAN ke pola itu, yang perlu disimpan cuma
+satu `seal` per JUDUL — bukan satu baris per episode. Itu sebabnya lapisan ini
+kecil dan tidak ada episode yang bisa terlewat: berapa pun episodenya, URL-nya
+terbentuk. Polanya ikut diterbitkan di berkasnya, jadi kalau penyedia mengubah
+bentuk alamat, yang perlu diterbitkan ulang cukup berkasnya — tanpa APK baru.
+
+`server == 0` berarti situs itu sendiri menyatakan judulnya belum punya
+sumber; entri seperti itu tidak pernah diterbitkan.
+
+**Penjodohannya KETAT, sama alasannya dengan 3h.** Anikai tidak membawa
+AniList id, jadi jembatannya judul: judul ternormalkan harus SAMA PERSIS
+dengan romaji atau judul Inggris AniList, dan yang cocok ke lebih dari satu id
+DILEWATI sebagai ambigu. Berbeda dari 3i, penanda musim TIDAK dibuang — di
+sana AniList memecah musim sementara TMDB menyatukan, sedangkan di sini kedua
+sisi sama-sama anime dan sama-sama memecah musim, jadi "Season 2" justru
+pembeda yang sah.
+
+**Lapisan ini TIDAK masuk Room.** Isinya hanya seal per judul, umurnya seumur
+sesi, dan hanya dibaca saat pemutar anime dibuka — jadi ditahan di memori
+`MovieRepository` di belakang Mutex. Menyimpannya ke Room berarti satu tabel
+dan satu migrasi baru untuk data yang tidak perlu bertahan.
+
+**Kunci proses tunggal di `anikai_servers.py` jangan dilepas.** Dua pemanen
+pernah berjalan bersamaan dan saling menimpa berkas sementara yang sama,
+sehingga `os.replace()` gagal dan hasil panennya hilang — jebakan yang sama
+yang sudah tercatat untuk `build_database.py`.
 
 ### 4. Pemutar sudah bekerja — jangan refactor `MoviePlayerScreen.kt` tanpa alasan kuat
 

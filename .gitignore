@@ -71,3 +71,9 @@ backend/scraper/.env.*
 
 # Katalog uji sementara untuk mencoba sumber pemutar baru.
 backend/api/dist-uji/
+
+# Panen server anime anikai: berkas ANTARA, bukan yang diterbitkan.
+# Yang terbit anime_servers.json (kecil, dilacak); ini sumber mentahnya.
+backend/data/anikai_database.json
+backend/data/anikai_database.json.tmp
+backend/data/anikai_servers.lock

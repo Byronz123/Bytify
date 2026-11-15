@@ -94,3 +94,35 @@ fun serverTambahan(
     }
     return RUTE.map { MovieServerDto(server = it.nama, url = it.film(tmdbId)) }
 }
+
+/** AniList id dari id katalog anime ("anilist-113415" -> 113415). */
+fun anilistIdDari(idFilm: String): Int? =
+    idFilm.removePrefix("anilist-").substringBefore('-').toIntOrNull()?.takeIf { it > 0 }
+        ?.takeIf { idFilm.startsWith("anilist-") }
+
+/**
+ * Server anikai untuk satu episode anime.
+ *
+ * URL-nya dibentuk dari `pattern` yang ikut diterbitkan bersama lapisannya,
+ * bukan dari pola yang ditanam di sini — kalau penyedia mengubah bentuk
+ * alamatnya, yang perlu diterbitkan ulang cukup berkasnya, tanpa APK baru.
+ *
+ * Mengembalikan null bila judulnya tidak ada di lapisan itu, atau bila
+ * penyedia menyatakan judulnya belum punya sumber (`server` 0).
+ */
+fun serverAnikai(
+    katalog: AnimeServerCatalogDto,
+    anilistId: Int,
+    episode: Int,
+): MovieServerDto? {
+    val entri = katalog.titles[anilistId.toString()] ?: return null
+    if (entri.seal.isBlank() || entri.server <= 0) return null
+    if (katalog.player.isBlank() || katalog.pattern.isBlank()) return null
+    val url = katalog.pattern
+        .replace("{player}", katalog.player)
+        .replace("{seal}", entri.seal)
+        .replace("{episode}", episode.coerceAtLeast(1).toString())
+        .replace("{server}", entri.server.toString())
+        .replace("{audio}", katalog.audio.ifBlank { "sub" })
+    return MovieServerDto(server = "anikai", url = url)
+}

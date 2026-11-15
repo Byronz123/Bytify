@@ -239,6 +239,51 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
             );
         }
 
+        // --- Lapisan SERVER anime (anikai) ---
+        //
+        // Lapisan kunci pemutar, bukan katalog. Yang dijaga di sini persis
+        // sifat yang membuatnya aman dan kecil: tidak ada judul/poster/sinopsis
+        // yang ikut, tiap entri benar-benar bisa dipakai, dan polanya lengkap —
+        // sebab URL tiap episode dibentuk aplikasi DARI pola itu, jadi pola
+        // yang cacat berarti seluruh anime kehilangan server cadangannya.
+        const srvSumber = path.join(backendDir, 'data', 'anime_servers.json');
+        if (fs.existsSync(srvSumber)) {
+            const srvPath = path.join(outDir, 'api', 'anime-servers.json');
+            assert.ok(fs.existsSync(srvPath), 'anime-servers.json harus ikut terbit');
+
+            const mib = fs.statSync(srvPath).size / 1024 / 1024;
+            assert.ok(mib < 24, `anime-servers.json ${mib.toFixed(2)} MiB melewati ambang 24 MiB`);
+
+            const srv = JSON.parse(fs.readFileSync(srvPath, 'utf8'));
+            assert.ok(srv.player && srv.player.startsWith('https://'), 'player harus https');
+            for (const tanda of ['{player}', '{seal}', '{episode}', '{server}', '{audio}']) {
+                assert.ok(
+                    String(srv.pattern || '').includes(tanda),
+                    `pattern harus memuat ${tanda}`,
+                );
+            }
+
+            const entri = Object.entries(srv.titles || {});
+            assert.ok(entri.length > 0, 'lapisan server anime tidak boleh kosong');
+            for (const [idAnilist, nilai] of entri) {
+                assert.ok(/^\d+$/.test(idAnilist), `kunci harus AniList id: ${idAnilist}`);
+                assert.ok(nilai.seal, `seal kosong untuk ${idAnilist}`);
+                assert.ok(nilai.server > 0, `server 0 tidak boleh terbit: ${idAnilist}`);
+                // Hanya kunci pemutar yang boleh ada. Kalau suatu saat ada yang
+                // menyelipkan metadata ke sini, lapisannya berhenti kecil.
+                assert.deepEqual(
+                    Object.keys(nilai).sort(),
+                    ['seal', 'server'],
+                    `entri ${idAnilist} hanya boleh membawa seal dan server`,
+                );
+            }
+
+            assert.ok(
+                fs.readFileSync(srvPath).equals(fs.readFileSync(srvSumber)),
+                'anime-servers.json must be copied byte-for-byte',
+            );
+        }
+
         // Disalin apa adanya: byte-identik dengan sumber.
         assert.ok(
             fs.readFileSync(builtPath).equals(fs.readFileSync(sourcePath)),

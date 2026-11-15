@@ -90,6 +90,22 @@ if (fs.existsSync(animeSource)) {
     fs.copyFileSync(animeSource, animeOut);
 }
 
+// Lapisan SERVER ANIME (anikai), dikunci AniList id.
+//
+// Bukan katalog: tidak membawa judul, poster, maupun sinopsis, dan isinya tidak
+// pernah masuk tabel `movies`. Isinya satu kunci pemutar per JUDUL, bukan per
+// episode — URL tiap episode dibentuk aplikasi dari `pattern` yang ikut terbit,
+// jadi berapa pun episodenya tetap terjangkau tanpa satu baris per episode.
+const animeServerSource = path.join(backendDir, 'data', 'anime_servers.json');
+let animeServerCount = 0;
+if (fs.existsSync(animeServerSource)) {
+    const srv = readJson(animeServerSource); // validasi JSON sebelum menyalin
+    animeServerCount = Object.keys(srv.titles || {}).length;
+    const srvOut = path.join(outputDir, 'api', 'anime-servers.json');
+    fs.mkdirSync(path.dirname(srvOut), { recursive: true });
+    fs.copyFileSync(animeServerSource, srvOut);
+}
+
 // Lapisan KETERSEDIAAN RESMI: tiap judul membawa daftar penyedia sah di
 // Indonesia (data JustWatch lewat TMDB), bukan URL stream. Bentuknya beda dari
 // keempat katalog di atas — kuncinya `titles` + kamus `providers`, bukan
@@ -125,6 +141,7 @@ console.log(
     `Copied ${movieCount} movies (${sectionCount} sections), ${seriesCount} series ` +
         `(${seriesEpisodeCount} episodes), ${indoCount} Indonesian films verbatim, ` +
         `${animeCount} anime (${animeEpisodeCount} episodes), ` +
+        `${animeServerCount} anime with anikai servers, ` +
         `${watchCount} titles with official availability ` +
         `(${watchProviderCount} providers), ` +
         `and generated ${channels.length} live channels in ${outputDir}.`,

@@ -19,7 +19,7 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
 | Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH; 2.486 dapat chip |
-| Anime | 13.094 | 87.430 episode (cap 12/judul); embed framextv, berkas TERPISAH |
+| Anime | 6.076 | 71.468 episode (cap 26/judul); pemutar ANIKAI, berkas TERPISAH |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
 | Ketersediaan resmi | lihat 3e | judul + layanan sah di Indonesia; TANPA URL stream |
@@ -749,6 +749,24 @@ memanen judul untuk SELURUH katalog (bukan hanya kandidat TMDB seperti
 `--judul`), berikut `synonyms` — karena AniList pun hanya punya judul Inggris
 resmi untuk 7.500 dari 14.577 entri, dan nama yang dipakai situs pihak ketiga
 biasanya ada di daftar sinonim.
+
+**Katalog anime HANYA memuat judul yang bisa ditonton.** Sejak framextv
+terbukti tidak bisa dipakai, `build_anime_catalog.py` membaca
+`anime_servers.json` dan MELEWATI anime yang tidak punya seal anikai — 7.018
+judul dibuang. Menerbitkan judul yang bisa dibuka tetapi tidak bisa ditonton
+lebih buruk daripada tidak menampilkannya. AniList tetap dipakai sebagai
+sumber METADATA (judul, poster, sinopsis, genre, jumlah episode); yang dibuang
+perannya sebagai server. Metadata anikai sendiri tidak bisa dipakai (3f).
+
+Berkasnya menyusut 19,96 -> 17,60 MiB meski cap episodenya dinaikkan 8 -> 26,
+sehingga anime dua-cour kini tersimpan UTUH tanpa perlu dilengkapi aplikasi.
+
+**Pelengkap episode harus mengenali DUA bentuk alamat.** Setelah pindah ke
+anikai, nomor episode bukan lagi segmen jalur (`.../anime/<id>/<n>`) melainkan
+bagian fragmen (`...#<seal>.<n>.<server>.<audio>`). `alamatEpisode()` di
+MovieModels.kt mengenali keduanya dan mengembalikan null untuk bentuk lain —
+lebih baik episode seadanya daripada alamat tebakan yang membawa penonton ke
+episode yang salah.
 
 **Plafonnya 8.006, bukan 13.094.** anikai hanya memuat 8.006 judul, jadi
 "semua anime dapat anikai" mustahil secara struktur. Ukur kemajuan terhadap

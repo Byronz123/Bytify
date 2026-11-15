@@ -182,6 +182,7 @@ def ambil_judul_anilist(ids):
         media(id_in: $ids, type: ANIME) {
           id
           title { romaji english native }
+          synonyms
           startDate { year }
         }
       }
@@ -205,6 +206,12 @@ def ambil_judul_anilist(ids):
                         "romaji": t.get("romaji"),
                         "english": t.get("english"),
                         "native": t.get("native"),
+                        # Sinonim ikut diambil karena banyak anime TIDAK punya
+                        # judul Inggris resmi di AniList (terukur: hanya 7.500
+                        # dari 14.577), sementara situs pihak ketiga menamai
+                        # judulnya dalam bahasa Inggris. Sinonim sering memuat
+                        # justru nama yang dipakai situs-situs itu.
+                        "synonyms": [s for s in (m.get("synonyms") or []) if s],
                         "year": (m.get("startDate") or {}).get("year"),
                     }
                 break
@@ -416,7 +423,12 @@ def panen_judul_semua():
                 lama = json.load(f)
         except (OSError, json.JSONDecodeError):
             lama = {}
-    kurang = [i for i in ids if not (lama.get(str(i)) or {}).get("english")]
+    # Yang dipanen ulang bukan yang "belum punya judul Inggris", melainkan yang
+    # belum pernah dipanen dengan skema SEKARANG. Banyak anime memang tidak
+    # punya judul Inggris resmi, jadi syarat lama membuat mereka dipanen
+    # berulang kali tanpa hasil — sementara sinonimnya, yang justru berguna,
+    # tidak pernah terambil.
+    kurang = [i for i in ids if "synonyms" not in (lama.get(str(i)) or {})]
     print("[judul] katalog %d anime; %d sudah punya judul Inggris; "
           "%d akan dipanen" % (len(ids), len(ids) - len(kurang), len(kurang)))
     if not kurang:

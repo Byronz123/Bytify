@@ -31,12 +31,16 @@ DIR_DATA = os.path.join(os.path.dirname(__file__), "..", "data")
 SUMBER = os.path.join(DIR_DATA, "anime_database.json")
 KELUARAN = os.path.join(DIR_DATA, "anime_catalog.json")
 
-CERMIN = ("https://framextv.xyz", "https://framextv.cc",
-          "https://framextv.tech", "https://framextv.pro")
+LAPISAN_SERVER = os.path.join(DIR_DATA, "anime_servers.json")
+
+#: Pemutar anime. Polanya sama persis dengan yang diterbitkan di
+#: anime_servers.json, dan keduanya dibaca dari kode situs anikai sendiri.
+PEMUTAR_ANIKAI = "https://play.anikai.org"
+POLA_ANIKAI = "{player}/watch#{seal}.{episode}.{server}.{audio}"
 
 #: Episode yang disimpan per judul. Dinaikkan kalau berkasnya masih jauh di
 #: bawah ambang; diturunkan kalau mendekat.
-BATAS_EPISODE = 8
+BATAS_EPISODE = 26
 
 #: Potong sinopsis anime. Tak ada enrichIfNeeded untuk id anilist-, jadi ini
 #: permanen; 400 karakter menyisakan sinopsis yang utuh maknanya.
@@ -52,10 +56,27 @@ def _potong(teks):
     return potong.rstrip(".,; ") + "..."
 
 
-def ramping(a):
+def ramping(a, lapisan):
     aid = a.get("anilistId")
     judul = (a.get("title") or "").strip()
     if not aid or not judul:
+        return None
+
+    # Hanya anime yang BISA DITONTON yang diterbitkan.
+    #
+    # Pemutar anime dulu embed framextv berkunci AniList id, dan itu terbukti
+    # tidak bisa dipakai: keempat "cermin"-nya satu server yang sama (semua
+    # dialihkan ke framextv.cc, backend api.framextv.tech membalas HTTP 429),
+    # dan dua anime yang diuji di Galaxy A36 sama-sama gagal sampai ambang
+    # waktu habis. Menerbitkan judul yang hanya punya server itu berarti
+    # mengisi katalog dengan judul yang bisa dibuka tetapi tidak bisa ditonton
+    # — lebih buruk daripada tidak menampilkannya sama sekali.
+    #
+    # AniList TETAP dipakai, tetapi hanya sebagai sumber METADATA (judul,
+    # poster, sinopsis, genre, jumlah episode). Metadata anikai sendiri tidak
+    # bisa dipakai menurut 3f: rating "8.2" dan tahun "2026" konstanta.
+    kunci = lapisan.get(str(aid))
+    if not kunci:
         return None
 
     jumlah = a.get("episodeCount")
@@ -65,17 +86,21 @@ def ramping(a):
         jumlah = 1
     disimpan = min(jumlah, BATAS_EPISODE)
 
+    def alamat(n):
+        return POLA_ANIKAI.format(
+            player=PEMUTAR_ANIKAI, seal=kunci["seal"], episode=n,
+            server=kunci["server"], audio="sub",
+        )
+
     episodes = [{
         "id": f"anilist-{aid}-e{n}",
         "title": f"Episode {n}",
         "season": 1,
         "episode": n,
-        "videoUrl": f"{CERMIN[0]}/embed/anime/{aid}/{n}",
+        "videoUrl": alamat(n),
     } for n in range(1, disimpan + 1)]
 
-    server = [{"server": "framextv", "url": f"{CERMIN[0]}/embed/anime/{aid}"}]
-    for i, basis in enumerate(CERMIN[1:], start=2):
-        server.append({"server": f"framextv-{i}", "url": f"{basis}/embed/anime/{aid}"})
+    server = [{"server": "anikai", "url": alamat(1)}]
 
     hasil = {
         "id": a["id"],
@@ -113,9 +138,16 @@ def main():
     with open(SUMBER, encoding="utf-8") as f:
         mentah = json.load(f)
 
+    if not os.path.exists(LAPISAN_SERVER):
+        print(f"Lapisan server belum ada: {LAPISAN_SERVER}. "
+              f"Jalankan anikai_servers.py lalu build_anime_servers.py dulu.")
+        return 1
+    with open(LAPISAN_SERVER, encoding="utf-8") as f:
+        lapisan = (json.load(f).get("titles") or {})
+
     keluar, dibuang, terlihat = [], 0, set()
     for satu in mentah:
-        rapi = ramping(satu)
+        rapi = ramping(satu, lapisan)
         if rapi is None or rapi["id"] in terlihat:
             dibuang += 1
             continue

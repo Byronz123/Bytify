@@ -723,6 +723,37 @@ ikut berganti kalau pembangun katalog berganti cermin. Dibatasi
 memori sinkron pernah menyentuh plafon heap (3m); terukur di A36 sesudahnya:
 Dalvik mengendap 26,5 MB, nol FATAL EXCEPTION.
 
+**Musim TMDB anime ditentukan dari judul, lalu DIPERIKSA SILANG.** Penjaga 3j
+memblokir subtitle per-episode untuk anime yang berbagi entri TMDB, dan
+akibatnya Jujutsu Kaisen tidak pernah punya pilihan subtitle Indonesia sama
+sekali — padahal subtitlenya ADA (`Jujutsu.Kaisen.S01E01.WEBRip.NF.id`,
+terbukti dari API produksi). Sekarang nomor musim dibaca dari judul
+("Season N", "Nth Season"; judul tanpa penanda = musim 1), lalu seluruh entri
+yang berbagi satu TMDB id dibandingkan: kalau nomornya berbeda-beda semua,
+pemetaannya dipakai; kalau ada DUA yang bertabrakan, seluruh grup itu tetap
+dilewati. Satu tabrakan berarti kita tidak tahu mana yang mana, dan subtitle
+musim yang salah lebih buruk daripada tidak ada subtitle (3h). Hasilnya 3.039
+judul dapat musim yang pasti, disimpan di `anime_servers.json` — bukan kolom
+Room baru, jadi tidak ada migrasi.
+
+**Jangan menyamakan "Part N" dengan "Season N".** Dr. Stone Part 3 dan
+Season 3 adalah dua hal berbeda; menyamakannya memasang server musim yang
+salah.
+
+**Penghambat pencocokan anikai bukan aturan, melainkan BAHASA JUDUL.** Yang
+pertama dicurigai adalah notasi musim yang berbeda ("… 2" vs "… Season 2"),
+dan penyeragamannya memang benar — tetapi hanya menambah 45 judul. Yang
+sebenarnya: **7.337 dari 13.094 anime tidak punya judul Inggris sama sekali**,
+sementara anikai menamai judulnya dalam bahasa Inggris. `--judul-semua`
+memanen judul untuk SELURUH katalog (bukan hanya kandidat TMDB seperti
+`--judul`), berikut `synonyms` — karena AniList pun hanya punya judul Inggris
+resmi untuk 7.500 dari 14.577 entri, dan nama yang dipakai situs pihak ketiga
+biasanya ada di daftar sinonim.
+
+**Plafonnya 8.006, bukan 13.094.** anikai hanya memuat 8.006 judul, jadi
+"semua anime dapat anikai" mustahil secara struktur. Ukur kemajuan terhadap
+8.006, bukan terhadap ukuran katalog kita.
+
 **Kunci proses tunggal di `anikai_servers.py` jangan dilepas.** Dua pemanen
 pernah berjalan bersamaan dan saling menimpa berkas sementara yang sama,
 sehingga `os.replace()` gagal dan hasil panennya hilang — jebakan yang sama

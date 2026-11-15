@@ -207,6 +207,16 @@ def main():
             n = normal(nilai.get(bentuk))
             if n:
                 indeks[n].add(aid)
+        # Sinonim ikut diindeks. Banyak anime tidak punya judul Inggris resmi
+        # di AniList, sementara situs pihak ketiga tetap menamainya dalam
+        # bahasa Inggris — dan nama itu biasanya ADA di daftar sinonim.
+        # Sinonim memang lebih berisik, tetapi aturan "cocok ke lebih dari
+        # satu id -> DILEWATI" tetap berlaku, jadi yang berisik berakhir
+        # sebagai judul yang dilewati, bukan sebagai server yang salah pasang.
+        for sinonim in (nilai.get("synonyms") or []):
+            n = normal(sinonim)
+            if n:
+                indeks[n].add(aid)
     # anime_database.json memuat 13.094 judul romaji — lebih luas daripada
     # anime_titles.json (7.577), jadi dipakai untuk menambah jangkauan.
     for satu in basis:

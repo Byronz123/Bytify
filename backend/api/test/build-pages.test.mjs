@@ -271,11 +271,21 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
                 assert.ok(nilai.server > 0, `server 0 tidak boleh terbit: ${idAnilist}`);
                 // Hanya kunci pemutar yang boleh ada. Kalau suatu saat ada yang
                 // menyelipkan metadata ke sini, lapisannya berhenti kecil.
-                assert.deepEqual(
-                    Object.keys(nilai).sort(),
-                    ['seal', 'server'],
-                    `entri ${idAnilist} hanya boleh membawa seal dan server`,
-                );
+                // `season` ikut diizinkan: ia bukan metadata judul melainkan
+                // nomor musim TMDB, yang dipakai meminta subtitle musim yang
+                // BENAR untuk anime (lihat 3p).
+                for (const kunci of Object.keys(nilai)) {
+                    assert.ok(
+                        ['seal', 'server', 'season'].includes(kunci),
+                        `entri ${idAnilist} membawa kunci tak dikenal: ${kunci}`,
+                    );
+                }
+                if (nilai.season !== undefined) {
+                    assert.ok(
+                        Number.isInteger(nilai.season) && nilai.season >= 1 && nilai.season <= 50,
+                        `season tidak wajar untuk ${idAnilist}: ${nilai.season}`,
+                    );
+                }
             }
 
             assert.ok(

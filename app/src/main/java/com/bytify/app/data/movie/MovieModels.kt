@@ -169,9 +169,7 @@ private fun lengkapiEpisode(
     if (target <= tersimpan.size || tersimpan.isEmpty()) return tersimpan
     val contoh = tersimpan.last()
     val alamat = contoh.videoUrl?.takeIf { it.isNotBlank() } ?: return tersimpan
-    // ".../embed/anime/113415/8" -> ".../embed/anime/113415"
-    val dasar = alamat.substringBeforeLast('/')
-    if (dasar.isBlank() || dasar == alamat) return tersimpan
+    val bentuk = alamatEpisode(alamat, contoh.episode) ?: return tersimpan
 
     val akhiran = idFilm.ifBlank { "anime" }
     val tambahan = (tersimpan.size + 1..target).map { nomor ->
@@ -180,10 +178,38 @@ private fun lengkapiEpisode(
             title = "Episode $nomor",
             season = contoh.season,
             episode = nomor,
-            videoUrl = "$dasar/$nomor",
+            videoUrl = bentuk(nomor),
         )
     }
     return tersimpan + tambahan
+}
+
+/** `#<seal>.<episode>.<server>.<audio>` — bentuk alamat pemutar anikai. */
+private val POLA_ANIKAI = Regex("""(#[^./]+\.)(\d+)(\.\d+\.[A-Za-z]+)$""")
+
+/**
+ * Membentuk "pabrik alamat" untuk episode lain dari SATU alamat contoh.
+ *
+ * Dua bentuk yang dipakai katalog anime, dan keduanya harus dikenali:
+ *   - `.../embed/anime/113415/8`              nomornya segmen jalur terakhir
+ *   - `.../watch#<seal>.8.2.sub`              nomornya bagian dari fragmen
+ *
+ * Mengembalikan null bila alamatnya tidak berbentuk salah satu dari itu —
+ * lebih baik menampilkan episode seadanya daripada membentuk alamat tebakan
+ * yang membawa penonton ke episode yang salah.
+ */
+private fun alamatEpisode(contoh: String, nomorContoh: Int): ((Int) -> String)? {
+    POLA_ANIKAI.find(contoh)?.let { cocok ->
+        val (awal, _, akhir) = cocok.destructured
+        val pangkal = contoh.substring(0, cocok.range.first)
+        return { nomor -> "$pangkal$awal$nomor$akhir" }
+    }
+    val ekor = contoh.substringAfterLast('/', "")
+    if (ekor.toIntOrNull() == nomorContoh && ekor.isNotEmpty()) {
+        val dasar = contoh.substringBeforeLast('/')
+        if (dasar.isNotBlank() && dasar != contoh) return { nomor -> "$dasar/$nomor" }
+    }
+    return null
 }
 
 /**

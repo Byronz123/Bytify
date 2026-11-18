@@ -276,7 +276,7 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
                 // BENAR untuk anime (lihat 3p).
                 for (const kunci of Object.keys(nilai)) {
                     assert.ok(
-                        ['seal', 'server', 'season'].includes(kunci),
+                        ['seal', 'server', 'season', 'eps'].includes(kunci),
                         `entri ${idAnilist} membawa kunci tak dikenal: ${kunci}`,
                     );
                 }

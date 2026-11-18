@@ -297,6 +297,15 @@ def main():
         # (sekitar 80 KB untuk seluruh berkas) sementara kontraknya jadi jelas
         # dan bisa diurai bertipe di aplikasi tanpa JsonElement.
         entri = {"seal": satu["seal"], "server": satu["server"]}
+        # Jumlah episode menurut ANIKAI, karena anikai-lah yang memutarnya.
+        #
+        # AniList memulangkan episodeCount kosong untuk serial yang masih
+        # berjalan, dan builder katalog lalu jatuh ke 1 — terukur: One Piece
+        # tampil 1 episode padahal anikai punya 1.180, dan 84 judul seperti itu
+        # kehilangan 10.156 episode seluruhnya.
+        eps = len(satu.get("episodes") or [])
+        if eps > 0:
+            entri["eps"] = eps
         # Nomor musim TMDB ikut, kalau bisa ditentukan dengan yakin. Inilah
         # yang membuka subtitle per-episode untuk anime yang selama ini
         # dilewati penjaga 3j.

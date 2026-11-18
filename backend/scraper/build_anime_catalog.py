@@ -80,7 +80,15 @@ def ramping(a, lapisan):
         return None
 
     jumlah = a.get("episodeCount")
-    if not isinstance(jumlah, int) or jumlah < 1:
+    if not isinstance(jumlah, int):
+        jumlah = 0
+    # Jumlah menurut ANIKAI menang kalau lebih banyak, karena anikai yang
+    # memutarnya. AniList memulangkan episodeCount kosong untuk serial yang
+    # masih berjalan — terukur: One Piece 0 di AniList, 1.180 di anikai, dan
+    # 84 judul seperti itu kehilangan 10.156 episode kalau angka AniList yang
+    # dipakai.
+    jumlah = max(jumlah, int(kunci.get("eps") or 0))
+    if jumlah < 1:
         # Judul yang jumlah episodenya belum diketahui (masih tayang) tetap
         # bisa dibuka; satu episode cukup untuk masuk ke pemutar.
         jumlah = 1

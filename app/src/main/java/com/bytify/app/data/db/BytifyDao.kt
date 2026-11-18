@@ -220,6 +220,21 @@ interface BytifyDao {
     @Query("DELETE FROM movies WHERE updatedAt < :syncedAt AND id NOT IN (SELECT movieId FROM movie_favorites)")
     suspend fun pruneMovies(syncedAt: Long)
 
+    /**
+     * Membuang anime lama berid "anilist-".
+     *
+     * Katalog anime pindah ke ruang id anikai. Tanpa pembersihan ini, baris
+     * dari sinkron sebelumnya tetap tinggal — `pruneMovies` hanya menyapu
+     * setelah katalog FILM, sementara anime datang dari berkas terpisah. Yang
+     * tersisa adalah judul ganda yang servernya framextv dan tidak bisa
+     * diputar sama sekali.
+     *
+     * Favorit sengaja TIDAK dikecualikan di sini: barisnya memang tidak bisa
+     * diputar lagi, jadi menahannya hanya menyisakan entri rusak.
+     */
+    @Query("DELETE FROM movies WHERE id LIKE 'anilist-%'")
+    suspend fun hapusAnimeAniList(): Int
+
     @Query(
         """SELECT m.* FROM movies AS m
            INNER JOIN movie_favorites AS f ON f.movieId = m.id

@@ -590,12 +590,12 @@ private const val ISI_DERET_GENRE = 20
  * mematikan aplikasi dengan OOM setelah anime masuk.
  *
  * Dua format id episode:
- *   anime  : "anilist-<id>-e<n>"      -> "anilist-<id>"
+ *   anime  : "anikai-<id>-e<n>"       -> "anikai-<id>"
  *   serial : "<slug>-s<musim>e<ep>"   -> "series-<slug>"
  * Mengembalikan null kalau id bukan pola episode (berarti film biasa).
  */
 private fun pemilikEpisode(idEpisode: String): String? {
-    Regex("""^(anilist-\d+)-e\d+$""").find(idEpisode)?.let { return it.groupValues[1] }
+    Regex("""^(anikai-\d+)-e\d+$""").find(idEpisode)?.let { return it.groupValues[1] }
     Regex("""^(.+)-s\d+e\d+$""").find(idEpisode)?.let { return "series-" + it.groupValues[1] }
     return null
 }

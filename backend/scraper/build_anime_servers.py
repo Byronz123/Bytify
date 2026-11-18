@@ -243,6 +243,19 @@ def main():
                    for x in basis if x.get("anilistId")}
     musim = peta_musim(judul_peta, judul_basis)
 
+    # AniList id -> TMDB id, dari jembatan yang sudah ada. Ikut diterbitkan di
+    # lapisan ini karena katalog anime tidak lagi berid "anilist-", sehingga
+    # tabel `watch_aliases` tidak bisa lagi menjangkau anime. Tanpa angka ini
+    # anime kehilangan subtitle seluruhnya.
+    tmdb_anilist = {}
+    if os.path.exists(WATCH):
+        with open(WATCH, encoding="utf-8") as f:
+            for k, v in ((json.load(f).get("aliases") or {})).items():
+                if k.startswith("anilist-") and v.get("tmdbId"):
+                    sisa = k.removeprefix("anilist-").split("-")[0]
+                    if sisa.isdigit():
+                        tmdb_anilist[int(sisa)] = int(v["tmdbId"])
+
     titles = {}
     cocok = ambigu = tanpa_sumber = tak_ketemu = luar_katalog = 0
     for satu in anikai:
@@ -266,8 +279,8 @@ def main():
                 kandidat = set(ketemu)
                 break
         if not kandidat:
+            kandidat = set()
             tak_ketemu += 1
-            continue
 
         if len(kandidat) > 1:
             # Tahun tayang sebagai PEMBEDA, bukan pelonggar: hanya dipakai
@@ -283,14 +296,18 @@ def main():
                     kandidat = sempit
         if len(kandidat) > 1:
             ambigu += 1
-            continue
-        aid = next(iter(kandidat))
-        if aid not in id_katalog:
-            luar_katalog += 1
-            continue
-        # Satu judul anikai per AniList id; yang pertama menang supaya
-        # hasilnya tidak berubah-ubah antar jalan.
-        kunci = str(aid)
+            kandidat = set()
+        aid = next(iter(kandidat)) if kandidat else None
+
+        # Kuncinya ID ANIKAI, bukan AniList.
+        #
+        # Katalog anime sepenuhnya milik anikai sekarang, jadi jembatan AniList
+        # turun pangkat: dari PENYARING menjadi PENGAYA. Judul yang tidak
+        # terjodohkan tetap terbit dan tetap bisa ditonton — yang hilang hanya
+        # subtitle, karena subtitle butuh TMDB id. Dulu judul seperti itu
+        # dibuang seluruhnya, dan itu membuang 1.466 judul yang sebetulnya
+        # bisa diputar.
+        kunci = str(satu["anikaiId"])
         if kunci in titles:
             continue
         # Objek bernama, bukan larik [seal, server]: selisih ukurannya kecil
@@ -309,9 +326,13 @@ def main():
         # Nomor musim TMDB ikut, kalau bisa ditentukan dengan yakin. Inilah
         # yang membuka subtitle per-episode untuk anime yang selama ini
         # dilewati penjaga 3j.
-        m = musim.get(aid)
-        if m:
-            entri["season"] = m
+        if aid is not None:
+            t = tmdb_anilist.get(aid)
+            if t:
+                entri["tmdbId"] = t
+                m = musim.get(aid)
+                if m:
+                    entri["season"] = m
         titles[kunci] = entri
         cocok += 1
 

@@ -264,6 +264,16 @@ data class AnimeServerDto(
     val seal: String = "",
     /** 0 berarti penyedia menyatakan judul ini belum punya sumber. */
     val server: Int = 0,
+    /** Jumlah episode menurut anikai. */
+    val eps: Int? = null,
+    /**
+     * TMDB id judul ini, kalau jembatan judul menemukannya.
+     *
+     * Ikut di lapisan ini karena katalog anime tidak lagi berid "anilist-",
+     * sehingga tabel `watch_aliases` tidak bisa menjangkau anime. Tanpa angka
+     * ini anime kehilangan subtitle seluruhnya.
+     */
+    val tmdbId: Int? = null,
     /**
      * Nomor musim TMDB judul ini, bila bisa ditentukan dengan yakin.
      *

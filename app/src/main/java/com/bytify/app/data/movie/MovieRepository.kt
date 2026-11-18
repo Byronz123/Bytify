@@ -324,6 +324,16 @@ class MovieRepository(
         // disentuh, sama seperti serial dan film Indonesia.
         val anime = runCatching { api.fetchAnimeCatalog() }.getOrNull()
         val jumlahAnime = simpanKatalogBerpotong(anime?.movies, now)
+        // Anime berid "anilist-" dibuang HANYA setelah katalog anime yang baru
+        // benar-benar tersimpan. Kalau unduhannya gagal, barisnya dibiarkan —
+        // katalog lama yang usang masih lebih baik daripada tidak ada anime
+        // sama sekali sampai jaringan pulih.
+        if (jumlahAnime > 0) {
+            val dibuang = runCatching { dao.hapusAnimeAniList() }.getOrDefault(0)
+            if (dibuang > 0) {
+                android.util.Log.i("BytifyKatalog", "anime anilist lama dibuang: $dibuang")
+            }
+        }
 
         return jumlahUtama + jumlahSerial + jumlahIndonesia + jumlahAnime
     }

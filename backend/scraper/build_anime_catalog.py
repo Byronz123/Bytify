@@ -2,23 +2,28 @@
 # Bytify\backend\scraper\build_anime_catalog.py
 # ==========================================
 """
-anime_database.json (AniList) -> anime_catalog.json (ramping, di-git).
+anikai_database.json -> anime_catalog.json (ramping, di-git).
 
-Dua batasan yang membentuk berkas ini:
+**Katalog anime sepenuhnya milik anikai.** AniList tidak lagi dipakai, baik
+sebagai sumber metadata maupun sebagai ruang id. Alasannya terukur:
 
-1. **Batas 25 MiB per berkas di Cloudflare Pages.** Karena itu anime terbit
-   sebagai berkas sendiri, bukan ditambahkan ke catalog.json yang sudah
-   23,26 MiB — pola yang sama dengan serial dan film Indonesia.
+- Pemutar berkunci AniList id (embed framextv) tidak bisa dipakai: keempat
+  "cermin"-nya satu server yang sama dan backend-nya membalas HTTP 429.
+- Selama katalog berid "anilist-", judul yang anikai punya tetapi AniList
+  tidak kenal tidak bisa diterbitkan sama sekali — 1.466 judul yang
+  sebenarnya bisa diputar ikut terbuang hanya karena penamaan.
 
-2. **Episode adalah penyumbang ukuran terbesar.** Satu entri episode sekitar
-   120 byte; judul sepanjang Hunter x Hunter (148 episode) atau One Piece
-   (ribuan) bisa sendirian memakan ratusan kilobyte. Karena itu jumlah episode
-   yang disimpan DIBATASI [BATAS_EPISODE]. URL-nya deterministik
-   (/embed/anime/<id>/<n>), jadi pembatasan ini hanya memotong daftar yang
-   tampil, bukan merusak pemutaran judul lain.
+Metadata diambil dari blok `application/ld+json` halaman anikai, yang membawa
+`name`, `alternateName`, `description`, `genre`, `image`, dan `datePublished`.
+Itu metadata ASLI milik situsnya — berbeda dari keluaran `scrape_anikai.js`
+yang dilarang 3f, yang rating dan tahunnya konstanta buatan.
 
-URL pemutar memakai rute embed anime yang DIPUBLIKASIKAN framextv:
-/embed/anime/:anilistId dan /embed/anime/:anilistId/:episode.
+Yang TIDAK tersedia dari anikai, dan karena itu tidak diterbitkan: skor
+rating. Jangan mengisinya dengan angka tebakan.
+
+Jembatan AniList masih dipakai di `build_anime_servers.py`, tetapi hanya
+sebagai PENGAYA untuk mendapatkan TMDB id (subtitle) — bukan sebagai penyaring
+dan bukan sebagai id katalog.
 """
 import json
 import os
@@ -28,139 +33,100 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 DIR_DATA = os.path.join(os.path.dirname(__file__), "..", "data")
-SUMBER = os.path.join(DIR_DATA, "anime_database.json")
+SUMBER = os.path.join(DIR_DATA, "anikai_database.json")
 KELUARAN = os.path.join(DIR_DATA, "anime_catalog.json")
 
-LAPISAN_SERVER = os.path.join(DIR_DATA, "anime_servers.json")
+#: Pemutar anime. Polanya dibaca dari kode situs anikai sendiri (js/main.js)
+#: dan harus sama persis dengan yang diterbitkan di anime_servers.json.
+PEMUTAR = "https://play.anikai.org"
+POLA = "{player}/watch#{seal}.{episode}.{server}.{audio}"
+AUDIO = "sub"
 
-#: Pemutar anime. Polanya sama persis dengan yang diterbitkan di
-#: anime_servers.json, dan keduanya dibaca dari kode situs anikai sendiri.
-PEMUTAR_ANIKAI = "https://play.anikai.org"
-POLA_ANIKAI = "{player}/watch#{seal}.{episode}.{server}.{audio}"
+#: Episode yang disimpan per judul. Sisanya dilengkapi aplikasi dari
+#: `episodeCount`, karena URL tiap episode hanya menyisipkan nomornya.
+#: 26 menutup anime dua-cour secara utuh.
+BATAS_EPISODE = 14
 
-#: Episode yang disimpan per judul. Dinaikkan kalau berkasnya masih jauh di
-#: bawah ambang; diturunkan kalau mendekat.
-BATAS_EPISODE = 26
-
-#: Potong sinopsis anime. Tak ada enrichIfNeeded untuk id anilist-, jadi ini
-#: permanen; 400 karakter menyisakan sinopsis yang utuh maknanya.
+#: Sinopsis dipotong. Anime tidak punya jalur `enrichIfNeeded` (itu hanya
+#: untuk id "lk21-"), jadi pemotongan ini PERMANEN.
 PANJANG_SINOPSIS = 400
 
 BATAS_AMAN_MIB = 24
 
 
 def _potong(teks):
-    if len(teks) <= PANJANG_SINOPSIS:
-        return teks
+    if not teks or len(teks) <= PANJANG_SINOPSIS:
+        return teks or ""
     potong = teks[:PANJANG_SINOPSIS].rsplit(" ", 1)[0]
     return potong.rstrip(".,; ") + "..."
 
 
-def ramping(a, lapisan):
-    aid = a.get("anilistId")
+def ramping(a):
+    aid = a.get("anikaiId")
     judul = (a.get("title") or "").strip()
-    if not aid or not judul:
+    seal = a.get("seal")
+    server = a.get("server")
+    # `server == 0` berarti situsnya sendiri menyatakan judul ini belum punya
+    # sumber. Menerbitkannya berarti mengisi katalog dengan judul yang bisa
+    # dibuka tetapi tidak bisa ditonton.
+    if not aid or not judul or not seal or not server:
         return None
 
-    # Hanya anime yang BISA DITONTON yang diterbitkan.
-    #
-    # Pemutar anime dulu embed framextv berkunci AniList id, dan itu terbukti
-    # tidak bisa dipakai: keempat "cermin"-nya satu server yang sama (semua
-    # dialihkan ke framextv.cc, backend api.framextv.tech membalas HTTP 429),
-    # dan dua anime yang diuji di Galaxy A36 sama-sama gagal sampai ambang
-    # waktu habis. Menerbitkan judul yang hanya punya server itu berarti
-    # mengisi katalog dengan judul yang bisa dibuka tetapi tidak bisa ditonton
-    # — lebih buruk daripada tidak menampilkannya sama sekali.
-    #
-    # AniList TETAP dipakai, tetapi hanya sebagai sumber METADATA (judul,
-    # poster, sinopsis, genre, jumlah episode). Metadata anikai sendiri tidak
-    # bisa dipakai menurut 3f: rating "8.2" dan tahun "2026" konstanta.
-    kunci = lapisan.get(str(aid))
-    if not kunci:
-        return None
-
-    jumlah = a.get("episodeCount")
-    if not isinstance(jumlah, int):
-        jumlah = 0
-    # Jumlah menurut ANIKAI menang kalau lebih banyak, karena anikai yang
-    # memutarnya. AniList memulangkan episodeCount kosong untuk serial yang
-    # masih berjalan — terukur: One Piece 0 di AniList, 1.180 di anikai, dan
-    # 84 judul seperti itu kehilangan 10.156 episode kalau angka AniList yang
-    # dipakai.
-    jumlah = max(jumlah, int(kunci.get("eps") or 0))
-    if jumlah < 1:
-        # Judul yang jumlah episodenya belum diketahui (masih tayang) tetap
-        # bisa dibuka; satu episode cukup untuk masuk ke pemutar.
-        jumlah = 1
-    disimpan = min(jumlah, BATAS_EPISODE)
+    nomor = a.get("episodes") or [1]
+    jumlah = len(nomor)
+    disimpan = nomor[:BATAS_EPISODE]
 
     def alamat(n):
-        return POLA_ANIKAI.format(
-            player=PEMUTAR_ANIKAI, seal=kunci["seal"], episode=n,
-            server=kunci["server"], audio="sub",
-        )
+        return POLA.format(player=PEMUTAR, seal=seal, episode=n,
+                           server=server, audio=AUDIO)
 
     episodes = [{
-        "id": f"anilist-{aid}-e{n}",
+        "id": f"anikai-{aid}-e{n}",
         "title": f"Episode {n}",
         "season": 1,
         "episode": n,
         "videoUrl": alamat(n),
-    } for n in range(1, disimpan + 1)]
-
-    server = [{"server": "anikai", "url": alamat(1)}]
+    } for n in disimpan]
 
     hasil = {
-        "id": a["id"],
+        "id": f"anikai-{aid}",
         "type": "series",
-        # Jumlah episode SEBENARNYA, bukan yang tersimpan.
-        #
-        # Daftar di bawah tetap dipotong BATAS_EPISODE supaya berkas ini muat
-        # di batas keras 25 MiB, tetapi aplikasi MELENGKAPI sisanya sendiri:
-        # URL episode deterministik (.../embed/anime/<id>/<n>), jadi menyimpan
-        # satu baris per episode hanya menyalin ulang sesuatu yang bisa
-        # dihitung. Tanpa angka ini, Jujutsu Kaisen tampil 8 episode padahal
-        # aslinya 24 — terukur, dan berlaku untuk 6.297 judul lain.
+        # Jumlah episode SEBENARNYA menurut anikai, bukan yang tersimpan.
         "episodeCount": jumlah,
         "title": judul,
         "overview": _potong((a.get("overview") or "").strip()),
-        "posterUrl": a.get("posterUrl"),
-        "releaseYear": a.get("releaseYear"),
+        "posterUrl": a.get("poster"),
+        "releaseYear": a.get("year"),
         "durationMin": a.get("durationMin"),
         "genres": list(dict.fromkeys(a.get("genres") or [])),
         "language": "ja",
         "videoUrl": episodes[0]["videoUrl"],
-        "sourceUrl": server[0]["url"],
-        "servers": server,
+        # Referer: alamat pemutarnya sendiri, sama seperti embed pihak ketiga
+        # lain. Pemutar dimuat LANGSUNG, tanpa pembungkus iframe.
+        "sourceUrl": episodes[0]["videoUrl"],
+        "servers": [{"server": "anikai", "url": episodes[0]["videoUrl"]}],
         "episodes": episodes,
     }
-    if isinstance(a.get("rating"), (int, float)) and a["rating"] > 0:
-        hasil["rating"] = a["rating"]
     return hasil
 
 
 def main():
     if not os.path.exists(SUMBER):
-        print(f"Sumber belum ada: {SUMBER}. Jalankan anilist_anime.py dulu.")
+        print(f"Sumber belum ada: {SUMBER}. Jalankan anikai_servers.py dulu.")
         return 1
     with open(SUMBER, encoding="utf-8") as f:
         mentah = json.load(f)
 
-    if not os.path.exists(LAPISAN_SERVER):
-        print(f"Lapisan server belum ada: {LAPISAN_SERVER}. "
-              f"Jalankan anikai_servers.py lalu build_anime_servers.py dulu.")
-        return 1
-    with open(LAPISAN_SERVER, encoding="utf-8") as f:
-        lapisan = (json.load(f).get("titles") or {})
-
     keluar, dibuang, terlihat = [], 0, set()
     for satu in mentah:
-        rapi = ramping(satu, lapisan)
+        rapi = ramping(satu)
         if rapi is None or rapi["id"] in terlihat:
             dibuang += 1
             continue
         terlihat.add(rapi["id"])
         keluar.append(rapi)
+
+    keluar.sort(key=lambda x: ((x.get("releaseYear") or 0), x["title"]), reverse=True)
 
     sementara = KELUARAN + ".tmp"
     with open(sementara, "w", encoding="utf-8") as f:
@@ -171,9 +137,14 @@ def main():
     byte = os.path.getsize(KELUARAN)
     mib = byte / 1024 / 1024
     episode = sum(len(x["episodes"]) for x in keluar)
-    print(f"{len(keluar)} anime, {episode} episode, {mib:.2f} MiB -> {KELUARAN}")
+    total = sum(x["episodeCount"] for x in keluar)
+    tanpa_poster = sum(1 for x in keluar if not x["posterUrl"])
+    print(f"{len(keluar)} anime, {episode} episode tersimpan "
+          f"({total} sebenarnya), {mib:.2f} MiB -> {KELUARAN}")
     if dibuang:
-        print(f"  {dibuang} entri dibuang (tanpa id/judul, atau ganda)")
+        print(f"  {dibuang} entri dibuang (tanpa seal/judul, atau ganda)")
+    if tanpa_poster:
+        print(f"  {tanpa_poster} entri tanpa poster")
     if mib > BATAS_AMAN_MIB:
         print(f"  PERINGATAN: {mib:.2f} MiB melewati ambang aman {BATAS_AMAN_MIB} MiB. "
               f"Turunkan BATAS_EPISODE.")

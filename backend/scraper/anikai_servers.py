@@ -81,9 +81,30 @@ POLA_ID_SLUG = re.compile(r"/watch/(.+)-(\d+)/?$")
 POLA_LD = re.compile(r'application/ld\+json[^>]*>(.*?)</script>', re.S)
 
 
+POLA_DURASI = re.compile(r"Duration:\s*</dt>\s*<dd>\s*([0-9]+)\s*min", re.I)
+
+
+def durasi_menit(html):
+    """Durasi per episode dari blok <dl>; JSON-LD tidak membawanya."""
+    m = POLA_DURASI.search(html or "")
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= 400:
+            return n
+    # Bentuk tanpa spasi/tag rapi: cari "Duration:" lalu angka terdekat.
+    i = (html or "").find("Duration:")
+    if i >= 0:
+        m2 = re.search(r"([0-9]{1,3})\s*min", html[i:i + 200], re.I)
+        if m2:
+            n = int(m2.group(1))
+            if 1 <= n <= 400:
+                return n
+    return None
+
+
 def dari_ld(html):
     """
-    Judul alternatif + tahun dari blok JSON-LD halaman.
+    Metadata dari blok JSON-LD halaman.
 
     Inilah yang membuat judul non-Jepang terjodohkan. Anikai menamai
     halamannya dalam bahasa Inggris ("Swallowed Star 2nd Season") sementara
@@ -117,8 +138,20 @@ def dari_ld(html):
                 alt = n.get("alternateName")
                 if isinstance(alt, list):
                     alt = next((x for x in alt if isinstance(x, str)), None)
-                return (alt.strip() if isinstance(alt, str) else None), tahun
-    return None, None
+                genre = [g for g in (n.get("genre") or []) if isinstance(g, str)]
+                gambar = n.get("image")
+                if isinstance(gambar, dict):
+                    gambar = gambar.get("url")
+                return {
+                    "altTitle": alt.strip() if isinstance(alt, str) else None,
+                    "year": tahun,
+                    "name": (n.get("name") or "").strip() or None,
+                    "overview": (n.get("description") or "").strip() or None,
+                    "genres": genre,
+                    "poster": gambar if isinstance(gambar, str) else None,
+                    "contentRating": n.get("contentRating") or None,
+                }
+    return {}
 
 _kunci = threading.Lock()
 
@@ -238,15 +271,21 @@ def panen_satu(alamat):
     if ms:
         slug = ms.group(1)
 
-    alt, tahun = dari_ld(html)
+    ld = dari_ld(html)
     episode = nomor_episode(id_anime)
     time.sleep(JEDA)
     return {
         "anikaiId": int(id_anime),
         "slug": slug,
-        "title": judul,
-        "altTitle": alt,
-        "year": tahun,
+        # Judul dari JSON-LD lebih dulu: ia judul karyanya, sementara
+        # <title> halaman membawa ekor " | AnimeKai".
+        "title": ld.get("name") or judul,
+        "altTitle": ld.get("altTitle"),
+        "year": ld.get("year"),
+        "overview": ld.get("overview"),
+        "genres": ld.get("genres") or [],
+        "poster": ld.get("poster"),
+        "durationMin": durasi_menit(html),
         "japanese": jepang,
         "seal": seal or None,
         "server": int(server),
@@ -305,7 +344,7 @@ def jalankan():
         if not m:
             return False
         lama = hasil.get(int(m.group(2)))
-        return bool(lama) and "altTitle" in lama
+        return bool(lama) and "poster" in lama
 
     sisa = [a for a in alamat if not sudah(a)]
     if arg.batas:

@@ -95,10 +95,18 @@ fun serverTambahan(
     return RUTE.map { MovieServerDto(server = it.nama, url = it.film(tmdbId)) }
 }
 
-/** AniList id dari id katalog anime ("anilist-113415" -> 113415). */
-fun anilistIdDari(idFilm: String): Int? =
-    idFilm.removePrefix("anilist-").substringBefore('-').toIntOrNull()?.takeIf { it > 0 }
-        ?.takeIf { idFilm.startsWith("anilist-") }
+/**
+ * Id anikai dari id katalog anime ("anikai-7696" -> 7696).
+ *
+ * Katalog anime berpindah dari ruang id AniList ke ruang id anikai, karena
+ * anikai yang memutarnya. Id "anilist-" lama tidak dikenali lagi — barisnya
+ * dibersihkan `MovieRepository` saat sinkron.
+ */
+fun anikaiIdDari(idFilm: String): Int? {
+    if (!idFilm.startsWith("anikai-")) return null
+    return idFilm.removePrefix("anikai-").substringBefore('-').toIntOrNull()
+        ?.takeIf { it > 0 }
+}
 
 /**
  * Server anikai untuk satu episode anime.
@@ -112,10 +120,10 @@ fun anilistIdDari(idFilm: String): Int? =
  */
 fun serverAnikai(
     katalog: AnimeServerCatalogDto,
-    anilistId: Int,
+    anikaiId: Int,
     episode: Int,
 ): MovieServerDto? {
-    val entri = katalog.titles[anilistId.toString()] ?: return null
+    val entri = katalog.titles[anikaiId.toString()] ?: return null
     if (entri.seal.isBlank() || entri.server <= 0) return null
     if (katalog.player.isBlank() || katalog.pattern.isBlank()) return null
     val url = katalog.pattern

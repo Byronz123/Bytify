@@ -19,7 +19,7 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
 | Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH; 2.486 dapat chip |
-| Anime | 6.541 | 76.424 episode (cap 26/judul); pemutar ANIKAI, berkas TERPISAH |
+| Anime | 8.007 | 140.002 episode (72.547 tersimpan, cap 14); id & pemutar ANIKAI |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
 | Ketersediaan resmi | lihat 3e | judul + layanan sah di Indonesia; TANPA URL stream |
@@ -789,9 +789,49 @@ Jebakan saat memanennya: `@graph` juga memuat simpul `WebSite` yang
 `alternateName`-nya "AniKai" — nama situsnya sendiri. Tanpa menyaring
 `@type`, setiap entri memakai nama itu. Saring ke TVSeries/Movie/TVSeason.
 
-**Plafonnya 8.006, bukan 13.094.** anikai hanya memuat 8.006 judul, jadi
-"semua anime dapat anikai" mustahil secara struktur. Ukur kemajuan terhadap
-8.006, bukan terhadap ukuran katalog kita.
+### 3q. Anime sepenuhnya milik anikai — id, katalog, server
+
+AniList DIBUANG dari anime: bukan lagi sumber metadata, bukan lagi ruang id.
+Katalog dibangun langsung dari `anikai_database.json`, id `anikai-<id>`.
+
+Dua alasan terukur:
+
+1. Pemutar berkunci AniList id (framextv) tidak bisa dipakai — empat "cermin"
+   satu server, backend membalas HTTP 429.
+2. Selama katalognya berid "anilist-", judul yang anikai punya tetapi AniList
+   tidak kenal tidak bisa diterbitkan sama sekali. Itu membuang 1.466 judul
+   yang sebenarnya bisa diputar.
+
+Hasilnya 6.541 -> **8.007 judul**, 140.002 episode.
+
+**Metadata anikai yang dipakai adalah JSON-LD halamannya, bukan keluaran
+`scrape_anikai.js`.** Bedanya penting: skrip JS itu mengarang rating "8.2" dan
+tahun "2026" (dilarang 3f), sedangkan `application/ld+json` membawa data asli
+situsnya — `name`, `alternateName`, `description`, `genre`, `image`,
+`datePublished`. Cakupannya hampir penuh: poster 8.007/8.007, sinopsis 7.978,
+genre 7.990, durasi 8.005.
+
+**Yang TIDAK tersedia: skor rating.** Jangan mengisinya dengan angka tebakan.
+
+**Jembatan AniList turun pangkat jadi PENGAYA, bukan penyaring.**
+`build_anime_servers.py` masih memakainya untuk mendapat `tmdbId` (5.723 dari
+8.007) dan `season` (3.314) — keduanya hanya untuk SUBTITLE. Judul tanpa
+padanan tetap terbit dan tetap bisa ditonton, hanya tanpa subtitle.
+`watch_aliases` tidak bisa lagi menjangkau anime karena id-nya berubah, jadi
+TMDB id ikut di lapisan server.
+
+**Baris `anilist-%` lama WAJIB dibuang saat sinkron.** `pruneMovies` hanya
+menyapu setelah katalog FILM, sementara anime datang dari berkas terpisah —
+tanpa `hapusAnimeAniList()` yang tersisa adalah judul ganda berserver framextv
+yang tidak bisa diputar. Pembersihnya dipanggil HANYA setelah katalog anime
+baru benar-benar tersimpan; kalau unduhannya gagal, barisnya dibiarkan.
+
+**Cap episode 14, bukan 26.** Dengan 8.007 judul, cap 26 memberi 22,75 MiB —
+terlalu dekat ambang 24. Cap 14 memberi 19,24 MiB. Sisanya dilengkapi aplikasi
+dari `episodeCount`.
+
+**Plafonnya 8.007.** anikai hanya memuat 8.007 judul; itu seluruh katalog
+anime sekarang.
 
 **Kunci proses tunggal di `anikai_servers.py` jangan dilepas.** Dua pemanen
 pernah berjalan bersamaan dan saling menimpa berkas sementara yang sama,

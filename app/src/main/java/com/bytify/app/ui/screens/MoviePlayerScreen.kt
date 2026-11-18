@@ -83,7 +83,7 @@ import com.bytify.app.data.movie.Movie
 import com.bytify.app.data.movie.MovieServerDto
 import com.bytify.app.data.movie.MovieSubtitleDto
 import com.bytify.app.data.movie.isJunkMediaUrl
-import com.bytify.app.data.movie.anilistIdDari
+import com.bytify.app.data.movie.anikaiIdDari
 import com.bytify.app.data.movie.serverAnikai
 import com.bytify.app.data.movie.serverTambahan
 import com.bytify.app.ui.ModeFloating
@@ -713,45 +713,51 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     var subtitlesJaring by remember(playKey) { mutableStateOf<List<MovieSubtitleDto>>(emptyList()) }
     LaunchedEffect(playKey) {
         val ket = app.container.ketersediaan
+        // ANIME punya jalurnya sendiri, dan harus: id katalognya "anikai-",
+        // bukan "anilist-", sehingga tabel `watch_aliases` tidak bisa
+        // menjangkaunya sama sekali. TMDB id dan nomor musimnya datang dari
+        // lapisan server anime, yang memang membawa keduanya.
+        val idAnikai = anikaiIdDari(movie.id)
+        if (idAnikai != null) {
+            val entri = runCatching { repository.serverAnime() }.getOrNull()
+                ?.titles?.get(idAnikai.toString())
+            val tmdbAnime = entri?.tmdbId ?: return@LaunchedEffect
+            // Tanpa nomor musim yang pasti, permintaan per-episode akan
+            // memulangkan subtitle MUSIM YANG SALAH. Lebih baik tidak ada
+            // subtitle daripada subtitle musim lain.
+            val musimAnime = entri.season ?: return@LaunchedEffect
+            subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
+                tmdbId = tmdbAnime,
+                type = "episode",
+                season = musimAnime,
+                episode = episode?.episode ?: 1,
+            )
+            Log.i(
+                EMBED_TAG,
+                "subtitle anime: tmdb=$tmdbAnime musim=$musimAnime " +
+                    "ep=${episode?.episode} hasil=${subtitlesJaring.size} " +
+                    "bahasa=${subtitlesJaring.map { it.lang }}",
+            )
+            return@LaunchedEffect
+        }
+
         val acuan = runCatching { ket.tmdbUntuk(movie.id) }.getOrNull() ?: return@LaunchedEffect
         val (tmdbId, tipeTmdb) = acuan
         val perEpisode = episode != null && tipeTmdb == "tv"
 
-        // Anime yang berbagi entri TMDB dengan musim lain dilewati: episode
+        // Serial yang berbagi entri TMDB dengan musim lain dilewati: episode
         // kita semuanya bernomor musim 1, jadi permintaannya akan memulangkan
         // subtitle musim yang salah. Chip ketersediaannya tetap tampil —
         // "ada di Netflix" benar untuk seluruh musim.
-        // Musim TMDB yang BENAR untuk anime, kalau lapisan server anime
-        // mengetahuinya. Tanpa ini permintaannya memakai musim 1 untuk semua
-        // episode, dan anime yang berbagi satu entri TMDB dengan musim lain
-        // terpaksa dilewati — itulah sebabnya Jujutsu Kaisen tidak pernah
-        // punya pilihan subtitle Indonesia sama sekali.
-        var musim = episode?.season
-        if (perEpisode) {
-            val musimAnime = anilistIdDari(movie.id)?.let { idAnilist ->
-                runCatching { repository.serverAnime() }.getOrNull()
-                    ?.titles?.get(idAnilist.toString())?.season
-            }
-            if (musimAnime != null) {
-                musim = musimAnime
-            } else if (!ket.amanSubtitlePerEpisode(movie.id, tmdbId, tipeTmdb)) {
-                // Musimnya tidak dapat dipastikan: penjaga lama tetap berlaku,
-                // karena subtitle musim yang salah lebih buruk daripada tidak
-                // ada subtitle.
-                return@LaunchedEffect
-            }
+        if (perEpisode && !ket.amanSubtitlePerEpisode(movie.id, tmdbId, tipeTmdb)) {
+            return@LaunchedEffect
         }
 
         subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
             tmdbId = tmdbId,
             type = if (perEpisode) "episode" else "movie",
-            season = musim,
+            season = episode?.season,
             episode = episode?.episode,
-        )
-        Log.i(
-            EMBED_TAG,
-            "subtitle anime: tmdb=$tmdbId musim=$musim ep=${episode?.episode} " +
-                "hasil=${subtitlesJaring.size} bahasa=${subtitlesJaring.map { it.lang }}",
         )
     }
     // Subtitle dari katalog diutamakan; yang dari jaringan hanya menambah
@@ -777,21 +783,18 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     LaunchedEffect(playKey) {
         // Anime ditangani lebih dulu dan TIDAK lewat jalur TMDB id.
         //
-        // Lapisan anikai dikunci AniList id langsung, sehingga musimnya sejalan
-        // dengan katalog kita dan penjaga ambiguitas musim tidak diperlukan —
-        // itu yang membuat anime akhirnya punya server cadangan, termasuk
-        // separuh judul yang selama ini terpaksa dilewati oleh penjaga itu.
-        // Terukur di A36: tanpa ini anime hanya punya framextv, yang keempat
-        // "cermin"-nya satu server dan membalas HTTP 429.
-        val idAnilist = anilistIdDari(movie.id)
-        if (idAnilist != null) {
+        // Katalognya sudah berisi server anikai untuk episode yang tersimpan;
+        // lapisan ini yang melayani episode HASIL PELENGKAPAN, karena ia
+        // membawa seal-nya dan bisa membentuk alamat episode berapa pun.
+        val idAnikai = anikaiIdDari(movie.id)
+        if (idAnikai != null) {
             val katalog = runCatching { repository.serverAnime() }.getOrNull()
             serverEkstra = listOfNotNull(
-                katalog?.let { serverAnikai(it, idAnilist, episode?.episode ?: 1) },
+                katalog?.let { serverAnikai(it, idAnikai, episode?.episode ?: 1) },
             )
             Log.i(
                 EMBED_TAG,
-                "server anime: anilist=$idAnilist lapisan=${katalog?.titles?.size ?: -1} " +
+                "server anime: anikai=$idAnikai lapisan=${katalog?.titles?.size ?: -1} " +
                     "hasil=${serverEkstra.size}",
             )
             return@LaunchedEffect
@@ -843,7 +846,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // framextv TIDAK dibuang, hanya turun urutan: ia tetap dicoba kalau
         // anikai gagal, dan 2.320 judul anikai yang tidak terjodohkan tetap
         // mengandalkannya.
-        val anime = movie.id.startsWith("anilist-")
+        val anime = movie.id.startsWith("anikai-")
         val dahulukanEkstra = anime && serverEkstra.isNotEmpty()
         if (dahulukanEkstra) {
             serverEkstra.forEach { tambah(it.server, it.url, it.url) }

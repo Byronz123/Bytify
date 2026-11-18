@@ -768,6 +768,27 @@ MovieModels.kt mengenali keduanya dan mengembalikan null untuk bentuk lain —
 lebih baik episode seadanya daripada alamat tebakan yang membawa penonton ke
 episode yang salah.
 
+**JSON-LD halaman anikai membawa judul romaji-nya — itu jembatan terpenting.**
+Berhenti di 6.076 adalah keputusan yang terlalu cepat. Sisa judul yang gagal
+didominasi donghua Tiongkok, dan sebabnya bukan aturan yang terlalu ketat
+melainkan BAHASA judulnya: anikai menamai halamannya dalam bahasa Inggris
+("Swallowed Star 2nd Season") sementara AniList menyimpan romaji
+("Tunshi Xingkong 2nd Season"). Blok `application/ld+json` di tiap halaman
+membawa keduanya:
+
+```json
+"@type":"TVSeries", "alternateName":"Tunshi Xingkong 2nd Season",
+"datePublished":"2021-12-29"
+```
+
+Jadi jembatannya tetap pencocokan PERSIS — yang bertambah bentuk judul yang
+dicoba, bukan kelonggarannya. `datePublished` dipakai sebagai PEMBEDA saat
+satu judul menunjuk lebih dari satu entri, bukan sebagai pelonggar.
+
+Jebakan saat memanennya: `@graph` juga memuat simpul `WebSite` yang
+`alternateName`-nya "AniKai" — nama situsnya sendiri. Tanpa menyaring
+`@type`, setiap entri memakai nama itu. Saring ke TVSeries/Movie/TVSeason.
+
 **Plafonnya 8.006, bukan 13.094.** anikai hanya memuat 8.006 judul, jadi
 "semua anime dapat anikai" mustahil secara struktur. Ukur kemajuan terhadap
 8.006, bukan terhadap ukuran katalog kita.

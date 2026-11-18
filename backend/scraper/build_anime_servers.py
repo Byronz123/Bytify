@@ -225,6 +225,18 @@ def main():
         if aid and n:
             indeks[n].add(int(aid))
 
+    # Tahun tayang per AniList id. Dipakai HANYA untuk memilah kandidat yang
+    # judulnya kebetulan sama — bukan untuk melonggarkan aturan judul.
+    tahun_anilist = {}
+    for kunci, nilai in judul_peta.items():
+        if str(kunci).isdigit() and nilai.get("year"):
+            tahun_anilist[int(kunci)] = int(nilai["year"])
+    for satu in basis:
+        aid = satu.get("anilistId")
+        thn = satu.get("releaseYear")
+        if aid and thn and int(aid) not in tahun_anilist:
+            tahun_anilist[int(aid)] = int(thn)
+
     # Hanya judul yang BENAR-BENAR ada di katalog terbit yang berguna.
     id_katalog = {int(x["anilistId"]) for x in basis if x.get("anilistId")}
     judul_basis = {int(x["anilistId"]): x.get("title") or ""
@@ -237,14 +249,38 @@ def main():
         if satu.get("server") == 0 or not satu.get("seal"):
             tanpa_sumber += 1
             continue
-        n = normal(satu.get("title"))
-        if not n:
-            tak_ketemu += 1
-            continue
-        kandidat = indeks.get(n)
+        # Judul halaman lebih dulu, lalu judul alternatif dari JSON-LD.
+        #
+        # `altTitle` itu yang menjembatani judul non-Jepang: anikai menamai
+        # halamannya dalam bahasa Inggris ("Swallowed Star 2nd Season")
+        # sementara AniList menyimpan romaji ("Tunshi Xingkong 2nd Season").
+        # Keduanya tetap dicocokkan PERSIS — yang bertambah bentuk judulnya,
+        # bukan kelonggarannya.
+        kandidat = None
+        for bentuk in (satu.get("title"), satu.get("altTitle")):
+            n = normal(bentuk)
+            if not n:
+                continue
+            ketemu = indeks.get(n)
+            if ketemu:
+                kandidat = set(ketemu)
+                break
         if not kandidat:
             tak_ketemu += 1
             continue
+
+        if len(kandidat) > 1:
+            # Tahun tayang sebagai PEMBEDA, bukan pelonggar: hanya dipakai
+            # ketika judulnya sudah cocok persis tetapi menunjuk lebih dari
+            # satu entri. Toleransi satu tahun karena tanggal tayang perdana
+            # berbeda antar wilayah.
+            thn = satu.get("year")
+            if thn:
+                sempit = {a for a in kandidat
+                          if tahun_anilist.get(a) is not None
+                          and abs(tahun_anilist[a] - int(thn)) <= 1}
+                if len(sempit) == 1:
+                    kandidat = sempit
         if len(kandidat) > 1:
             ambigu += 1
             continue

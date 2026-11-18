@@ -78,6 +78,47 @@ POLA_JUDUL = re.compile(r'<meta\s+property="og:title"\s+content="([^"]+)"', re.I
 POLA_JUDUL2 = re.compile(r"<title>(.*?)</title>", re.I | re.S)
 POLA_JEPANG = re.compile(r'"japanese"\s*:\s*"([^"]+)"')
 POLA_ID_SLUG = re.compile(r"/watch/(.+)-(\d+)/?$")
+POLA_LD = re.compile(r'application/ld\+json[^>]*>(.*?)</script>', re.S)
+
+
+def dari_ld(html):
+    """
+    Judul alternatif + tahun dari blok JSON-LD halaman.
+
+    Inilah yang membuat judul non-Jepang terjodohkan. Anikai menamai
+    halamannya dalam bahasa Inggris ("Swallowed Star 2nd Season") sementara
+    AniList menyimpan romaji ("Tunshi Xingkong 2nd Season"), dan tanpa
+    jembatan itu seluruh donghua gagal dicocokkan. JSON-LD membawa keduanya:
+    `alternateName` berisi bentuk romaji, `datePublished` berisi tanggal
+    tayang — dan tahun itu dipakai sebagai bukti penguat, bukan sebagai
+    pelonggar aturan.
+    """
+    for mentah in POLA_LD.findall(html or ""):
+        try:
+            data = json.loads(mentah)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        simpul = data.get("@graph") if isinstance(data, dict) else None
+        for n in (simpul if isinstance(simpul, list) else [data]):
+            if not isinstance(n, dict):
+                continue
+            # HANYA simpul karyanya. @graph juga memuat simpul WebSite yang
+            # alternateName-nya "AniKai" — nama situsnya sendiri, bukan judul
+            # anime — dan tanpa saringan ini setiap entri memakainya.
+            tipe = n.get("@type")
+            tipe = tipe if isinstance(tipe, str) else ""
+            if tipe not in ("TVSeries", "Movie", "TVSeason", "TVEpisode", "CreativeWork"):
+                continue
+            if n.get("alternateName") or n.get("datePublished"):
+                tahun = None
+                m = re.search(r"\b(19\d{2}|20\d{2})\b", str(n.get("datePublished") or ""))
+                if m:
+                    tahun = int(m.group(1))
+                alt = n.get("alternateName")
+                if isinstance(alt, list):
+                    alt = next((x for x in alt if isinstance(x, str)), None)
+                return (alt.strip() if isinstance(alt, str) else None), tahun
+    return None, None
 
 _kunci = threading.Lock()
 
@@ -197,12 +238,15 @@ def panen_satu(alamat):
     if ms:
         slug = ms.group(1)
 
+    alt, tahun = dari_ld(html)
     episode = nomor_episode(id_anime)
     time.sleep(JEDA)
     return {
         "anikaiId": int(id_anime),
         "slug": slug,
         "title": judul,
+        "altTitle": alt,
+        "year": tahun,
         "japanese": jepang,
         "seal": seal or None,
         "server": int(server),
@@ -254,8 +298,14 @@ def jalankan():
         print(f"{len(hasil)} judul sudah dipanen sebelumnya; dilanjutkan")
 
     def sudah(a):
+        # Dianggap selesai hanya kalau sudah dipanen dengan skema SEKARANG.
+        # Entri lama tidak membawa altTitle, dan justru field itulah yang
+        # menjembatani judul non-Jepang.
         m = POLA_ID_SLUG.search(a)
-        return bool(m) and int(m.group(2)) in hasil
+        if not m:
+            return False
+        lama = hasil.get(int(m.group(2)))
+        return bool(lama) and "altTitle" in lama
 
     sisa = [a for a in alamat if not sudah(a)]
     if arg.batas:

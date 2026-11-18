@@ -19,7 +19,7 @@ perintah ke saya untuk dijalankan manual kecuali memang butuh GUI.
 |---|---|---|
 | Film | 25.135 | 7 sections, 100% punya server |
 | Serial | 4.919 | 65.296 episode; berkas terbit TERPISAH; 2.486 dapat chip |
-| Anime | 6.076 | 71.468 episode (cap 26/judul); pemutar ANIKAI, berkas TERPISAH |
+| Anime | 6.541 | 76.424 episode (cap 26/judul); pemutar ANIKAI, berkas TERPISAH |
 | Kanal Live TV | 8.681 | 180 negara, semua HTTPS |
 | Katalog lagu | ~5.000 | di Room perangkat, bukan berkas |
 | Ketersediaan resmi | lihat 3e | judul + layanan sah di Indonesia; TANPA URL stream |

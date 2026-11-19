@@ -335,7 +335,17 @@ private const val GATE_BYPASS_JS = """
     Object.defineProperty(window, 'open', {
       value: function(){ return jendelaTiruan; }, writable:false, configurable:false
     });
-  } catch (e) { window.open = function(){ return jendelaTiruan; }; }
+  } catch (e) {
+    // Penjaga DI DALAM penjaga, dan ini bukan kehati-hatian berlebih: blok
+    // ini dulu mengulangi penugasan yang sama persis, sehingga pada halaman
+    // yang membuat `window.open` read-only ia melempar LAGI — kali ini tanpa
+    // yang menangkap. Terukur di Galaxy A36 pada veloflix:
+    // "TypeError: Cannot assign to read only property 'open' of object
+    // '#<Window>'", dan seluruh sisa GATE_BYPASS_JS tidak pernah dijalankan —
+    // tanpa pemantau, tanpa penjaga tinggi, tanpa pelewat panduan. Servernya
+    // lalu dibuang watchdog di detik ke-30 seolah-olah ia yang rusak.
+    try { window.open = function(){ return jendelaTiruan; }; } catch (e2) {}
+  }
 
   function buangLapisanGerbang(){
     var simpul = document.querySelectorAll('div,section,span,a,p');
@@ -356,7 +366,12 @@ private const val GATE_BYPASS_JS = """
       ['mousedown','mouseup','click'].forEach(function(jenis){
         sasaran.dispatchEvent(new MouseEvent(jenis, {bubbles:true, cancelable:true, view:window}));
       });
-      var v = document.querySelector('video');
+      // `cariVideo()`, bukan `querySelector` biasa: pemantau memakai pencari
+      // yang lebih kuat, dan memakai dua pencari berbeda membuat penjaga
+      // tinggi mengurus elemen yang BUKAN yang sedang diputar. Terukur pada
+      // veloflix: `BYTIFY_JALAN ... kotak=384x0` terus-menerus sementara
+      // penjaga tinggi tidak pernah menyentuhnya.
+      var v = cariVideo();
       if (v && v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function(){}); }
     } catch (e) {}
   }
@@ -437,7 +452,10 @@ private const val GATE_BYPASS_JS = """
   // Saklar percobaan: penjepit wadah dan pemaku video. Dibuat bisa dimatikan
   // supaya sebabnya bisa DIPISAH, bukan ditebak — layar hitam dengan suara
   // berjalan bisa datang dari aliran, dari tata letak, ATAU dari komposisi.
-  var BYTIFY_JEPIT = true;
+  // Diisi dari Kotlin saat dokumen ini disisipi: tiap host punya kamarnya
+  // sendiri, jadi skrip yang sama berperilaku berbeda per penyedia.
+  var BYTIFY_PROFIL = __PROFIL__;
+  var BYTIFY_JEPIT = BYTIFY_PROFIL.jepit;
   function pastikanTinggi(){
     try {
       var h = window.innerHeight || document.documentElement.clientHeight || 0;
@@ -487,16 +505,27 @@ private const val GATE_BYPASS_JS = """
       // Syaratnya `readyState >= 2`: sebelum ada data, video yang disembunyikan
       // memang belum punya apa pun untuk ditampilkan, dan memaksanya hanya
       // menukar hitam dengan hitam.
-      if (v && v.readyState >= 2) {
-        var gv = getComputedStyle(v);
-        if (parseFloat(gv.opacity || '1') < 0.05) {
-          v.style.setProperty('opacity', '1', 'important');
-        }
-        if (gv.visibility === 'hidden') {
-          v.style.setProperty('visibility', 'visible', 'important');
-        }
-        if (gv.display === 'none') {
-          v.style.setProperty('display', 'block', 'important');
+      if (v && v.readyState >= 2 && BYTIFY_PROFIL.paksaTerlihat) {
+        // Videonya DAN leluhurnya. Terukur pada veloflix: memaksa opacity
+        // elemen videonya saja tidak cukup — `op` tetap terbaca 0 karena yang
+        // disembunyikan pembungkusnya, dan pembungkus yang transparan membuat
+        // video di dalamnya ikut tak terlihat betapapun jelasnya ia sendiri.
+        var sasaran = v, lapis = 0;
+        while (sasaran && lapis < 6) {
+          var gs = getComputedStyle(sasaran);
+          if (parseFloat(gs.opacity || '1') < 0.05) {
+            sasaran.style.setProperty('animation', 'none', 'important');
+            sasaran.style.setProperty('transition', 'none', 'important');
+            sasaran.style.setProperty('opacity', '1', 'important');
+          }
+          if (gs.visibility === 'hidden') {
+            sasaran.style.setProperty('visibility', 'visible', 'important');
+          }
+          if (gs.display === 'none') {
+            sasaran.style.setProperty('display', 'block', 'important');
+          }
+          sasaran = sasaran.parentElement;
+          lapis++;
         }
       }
 
@@ -547,6 +576,44 @@ private const val GATE_BYPASS_JS = """
       }
     } catch (e) {}
   }
+  // Pemutar yang menulis ulang gayanya tiap render MENANG melawan interval:
+  // 400 ms terlalu lambat, dan menurunkannya hanya memboroskan CPU. Pengamat
+  // mutasi memulihkan sendiri setiap kali atributnya disentuh.
+  function jagaTerlihat(){
+    try {
+      if (!BYTIFY_PROFIL.paksaTerlihat || typeof MutationObserver !== 'function') return;
+      var v = cariVideo();
+      if (!v || v.__bytifyDijaga) return;
+      v.__bytifyDijaga = true;
+      var pulihkan = function(){
+        var n = v, l = 0;
+        while (n && l < 6) {
+          var g = getComputedStyle(n);
+          if (parseFloat(g.opacity || '1') < 0.05) {
+            // Animasi dan transisi CSS MENGALAHKAN gaya inline, jadi
+            // menimpa opacity saja tidak cukup — terukur pada zxcstream di
+            // dalam veloflix: `op` tetap 0 meski sudah dipaksa `!important`.
+            n.style.setProperty('animation', 'none', 'important');
+            n.style.setProperty('transition', 'none', 'important');
+            n.style.setProperty('opacity', '1', 'important');
+          }
+          if (g.visibility === 'hidden') {
+            n.style.setProperty('visibility', 'visible', 'important');
+          }
+          n = n.parentElement; l++;
+        }
+      };
+      var pengamat = new MutationObserver(pulihkan);
+      var sasaran = v, lapis = 0;
+      while (sasaran && lapis < 6) {
+        pengamat.observe(sasaran, { attributes: true, attributeFilter: ['style', 'class'] });
+        sasaran = sasaran.parentElement; lapis++;
+      }
+      pulihkan();
+    } catch (e) {}
+  }
+  setInterval(jagaTerlihat, 1000);
+
   setInterval(pastikanTinggi, 400);
   window.addEventListener('resize', pastikanTinggi);
 
@@ -561,6 +628,33 @@ private const val GATE_BYPASS_JS = """
   // Tanpa pemeriksaan ini server seperti itu menahan ambang penuh, padahal
   // jawabannya sudah pasti sejak detik ke-20: tidak ada satu bait pun yang
   // datang.
+  // ---- Panduan veloflix: lima langkah yang menutupi pemutarnya ----
+  //
+  // veloflix membuka halaman tontonnya dengan modal "Panduan Menonton" berisi
+  // lima langkah, dan selama modal itu ada videonya tidak terlihat sama
+  // sekali. Ketukan otomatis justru MEMAJUKAN panduannya, bukan memutar film.
+  //
+  // Dibatasi ke host veloflix, dan hanya menekan tombol tutup atau "Lanjut"
+  // milik panduan itu — bukan pembersih umum seperti EMBED_CLEANUP_JS, yang
+  // justru merusak kontrol pemutar modern (3n).
+  var cobaPanduan = 0;
+  function lewatiPanduan(){
+    try {
+      if (!BYTIFY_PROFIL.lewatiPanduan) return;
+      if (cobaPanduan++ > 20) return;
+      var tombol = [].slice.call(document.querySelectorAll('button'));
+      for (var i = 0; i < tombol.length; i++) {
+        var t = (tombol[i].textContent || '').trim();
+        if (t === '×' || t === '✕' || t === '✖') { tombol[i].click(); return; }
+      }
+      for (var j = 0; j < tombol.length; j++) {
+        var u = (tombol[j].textContent || '').trim();
+        if (/^(lanjut|next|selesai|mulai|lewati)$/i.test(u)) { tombol[j].click(); return; }
+      }
+    } catch (e) {}
+  }
+  setInterval(lewatiPanduan, 900);
+
   var lapornyaGagal = false;
   function cekSumberMandek(){
     try {
@@ -839,7 +933,7 @@ private val EMBED_CLEANUP_JS = """
       if (st.position==='fixed' && parseInt(st.zIndex||'0') > 999 && !keep(el)) el.style.setProperty('display','none','important');
     });
   }
-  window.open = function(){ return null; };
+  try { window.open = function(){ return null; }; } catch (e) {}
   clean();
   try {
     var fr = document.querySelector('iframe');
@@ -914,6 +1008,141 @@ private const val BATAS_SABAR_MS = 45_000L
  * yang sepadan tanpa menahan server yang benar-benar mati terlalu lama.
  */
 private const val BATAS_KETUK_MS = 30_000L
+
+/**
+ * Disuntikkan DARI KOTLIN ke dokumen utama yang tidak kita proksikan.
+ *
+ * Halaman seperti veloflix tidak boleh diambil ulang lewat OkHttp (sesinya
+ * rusak tanpa cookie), sehingga `GATE_BYPASS_JS` tidak pernah masuk ke sana.
+ * Akibatnya tidak ada yang memberi tinggi pada iframe pemutarnya, dan terukur
+ * di Galaxy A36 videonya berjalan dengan `kotak=384x0` — ada suaranya, tidak
+ * ada gambarnya.
+ *
+ * `evaluateJavascript` tidak terpengaruh interception, jadi inilah jalan
+ * masuknya. Isinya sengaja minimal: tinggi iframe, dan tombol panduan.
+ */
+private const val SUNTIK_LUAR_JS = """
+    (function(){
+      try {
+        var h = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (h > 2) {
+          var fr = document.querySelectorAll('iframe');
+          for (var i = 0; i < fr.length; i++) {
+            if (fr[i].offsetWidth > 2 && fr[i].offsetHeight < h - 2) {
+              fr[i].style.height = h + 'px';
+              fr[i].style.minHeight = h + 'px';
+            }
+          }
+          if (document.body) document.body.style.margin = '0';
+        }
+        if (/veloflix/i.test(location.hostname)) {
+          var tb = [].slice.call(document.querySelectorAll('button'));
+          for (var j = 0; j < tb.length; j++) {
+            var t = (tb[j].textContent || '').trim();
+            if (t === '\u00d7' || t === '\u2715') { tb[j].click(); return; }
+          }
+          for (var k = 0; k < tb.length; k++) {
+            var u = (tb[k].textContent || '').trim();
+            if (/^(lanjut|next|selesai|mulai|lewati)$/i.test(u)) { tb[k].click(); return; }
+          }
+        }
+      } catch (e) {}
+    })();
+"""
+
+/**
+ * KAMAR SENDIRI untuk tiap penyedia.
+ *
+ * Alasannya didapat dengan cara yang mahal: tiap kali satu server diperbaiki,
+ * perbaikannya berlaku untuk SEMUA server, dan yang tadinya sehat ikut rusak.
+ * Pembersih iklan LK21 merusak kontrol pemutar modern; ketukan otomatis yang
+ * dibutuhkan vidlink membuka menu subtitle anikai di atas video yang sedang
+ * berjalan; proksi dokumen yang wajib untuk embed LK21 mematikan sesi veloflix.
+ *
+ * Jadi perilaku itu TIDAK lagi global. Tiap host memilih kamarnya sendiri di
+ * sini, dan bawaannya konservatif: penyedia yang belum dikenal mendapat
+ * perlakuan paling netral, bukan paling agresif.
+ */
+private data class ProfilServer(
+    /** Ambil dokumennya sendiri lewat OkHttp lalu sisipi skrip. */
+    val proksiDokumen: Boolean = true,
+    /** Jalankan pembersih gerbang iklan. Hanya aman untuk halaman LK21. */
+    val pembersihIklan: Boolean = false,
+    /** Ketukan otomatis, dan jedanya. 0 berarti tidak diketuk sama sekali. */
+    val jedaKetukMs: Long = 6000L,
+    /** Jepit tinggi dokumen dan wadah video ke tinggi viewport. */
+    val jepitWadah: Boolean = true,
+    /** Paksa video yang disembunyikan pemutarnya sendiri agar terlihat. */
+    val paksaTerlihat: Boolean = true,
+    /** Tekan tombol panduan bertingkat milik situsnya. */
+    val lewatiPanduan: Boolean = false,
+    /** Ambang watchdog sebelum ada tanda kemajuan apa pun. */
+    val ambangMs: Long = BATAS_KETUK_MS,
+)
+
+/**
+ * Bawaan untuk penyedia yang belum punya kamar sendiri: proksi + sisipan,
+ * tanpa pembersih iklan, ketukan setelah 6 detik.
+ */
+private val PROFIL_BAWAAN = ProfilServer()
+
+private val PROFIL: List<Pair<String, ProfilServer>> = listOf(
+    // veloflix: aplikasi Next.js bersesi. Dokumennya TIDAK boleh diproksikan —
+    // tanpa cookie WebView ia memuat ulang dirinya tanpa henti dan iframe
+    // pemutarnya tidak pernah muncul. Panduan lima langkahnya menutupi video,
+    // jadi tombolnya ditekan sendiri.
+    "veloflix.my.id" to ProfilServer(
+        proksiDokumen = false,
+        lewatiPanduan = true,
+        jedaKetukMs = 0L,
+        ambangMs = 45_000L,
+    ),
+    // zxcstream: frame pemutar DI DALAM veloflix. Tetap disisipi, karena hanya
+    // skrip yang bisa melaporkan BYTIFY_SIAP — tanpa itu servernya dibuang
+    // watchdog betapapun sehatnya.
+    "zxcstream.cc" to ProfilServer(jedaKetukMs = 0L, ambangMs = 45_000L),
+    // anikai: mencapai SIAP di detik ke-3 dan tidak butuh ketukan; mengetuknya
+    // justru membuka menu subtitlenya di atas video yang sedang berjalan.
+    "anikai.org" to ProfilServer(jedaKetukMs = 0L),
+    "megaplay.buzz" to ProfilServer(jedaKetukMs = 0L),
+    // Pemutar yang baru membuat sumbernya SETELAH ada gestur.
+    "vidlink.pro" to ProfilServer(jedaKetukMs = 6000L),
+    "cinesrc.st" to ProfilServer(jedaKetukMs = 6000L),
+    "vidcore.io" to ProfilServer(jedaKetukMs = 6000L),
+)
+
+/** Kamar untuk [url]; bawaannya dipakai bila hostnya belum dikenal. */
+/**
+ * Menanam kamar [profil] ke dalam salinan skrip untuk satu dokumen.
+ *
+ * Satu berkas skrip, banyak perilaku: tanpa ini tiap perbaikan per penyedia
+ * harus jadi cabang `if (hostname)` di dalam skrip, dan itulah yang dulu
+ * membuat perbaikan satu server merusak server lain.
+ */
+private fun skripUntuk(profil: ProfilServer): String = GATE_BYPASS_JS.replace(
+    "__PROFIL__",
+    "{jepit:${profil.jepitWadah}," +
+        "paksaTerlihat:${profil.paksaTerlihat}," +
+        "lewatiPanduan:${profil.lewatiPanduan}}",
+)
+
+private fun profilUntuk(url: String?): ProfilServer {
+    val alamat = url.orEmpty().lowercase()
+    return PROFIL.firstOrNull { alamat.contains(it.first) }?.second ?: PROFIL_BAWAAN
+}
+
+/** Host yang dokumennya TIDAK boleh diambil ulang lewat OkHttp (lihat di bawah). */
+private val TANPA_PROKSI = listOf("veloflix.my.id")
+
+// CATATAN STATUS veloflix (belum selesai, jangan dianggap beres):
+// aliran dan tata letaknya sudah benar — `BYTIFY_JALAN t=710.59 maju=3.00
+// rs=4 buf=824.5 kotak=384x216@0,0 op=1` — tetapi layarnya MASIH hitam.
+// Yang sudah terbukti BUKAN sebabnya: tinggi iframe (sudah 216), opacity
+// video dan leluhurnya (sudah 1), animasi CSS (sudah dimatikan), skrip yang
+// mati (sudah diperbaiki), dan proksi dokumen (sudah dimatikan untuk host
+// ini). Tersangka berikutnya ada di dokumen LUAR veloflix yang memang tidak
+// kita sisipi: posisi iframe-nya di halaman, atau lapisan panduannya yang
+// masih menutupi. Ukur dari sana, jangan mengulang yang sudah dicoret.
 
 private fun mediaMimeType(url: String): String? = when (Uri.parse(url).path.orEmpty().substringAfterLast('.', "").lowercase()) {
     "m3u8" -> MimeTypes.APPLICATION_M3U8
@@ -1290,7 +1519,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 acuan.equals(serverAktif?.url, ignoreCase = true)
             val batas = when {
                 serverSiap || serverKemajuan -> BATAS_SABAR_MS
-                langsungAktif -> BATAS_KETUK_MS
+                langsungAktif -> profilUntuk(serverAktif?.url).ambangMs
                 else -> BATAS_TUNGGU_MS
             }
             if (lewat >= batas) {
@@ -2025,6 +2254,30 @@ private fun EmbedVideoStage(
                             // memuat <video> ikut mendapat penampil subtitle.
                             // Header Accept membedakan permintaan dokumen dari potongan
                             // media, jadi segmen video tidak ikut diproksikan.
+                            // Situs BERSESI tidak boleh diproksikan.
+                            //
+                            // Dokumen yang kita ambil sendiri dengan OkHttp tidak
+                            // membawa cookie WebView, jadi aplikasi yang
+                            // menyiapkan sesinya di sisi klien gagal bootstrap
+                            // dan MEMUAT ULANG dirinya terus-menerus. Terukur di
+                            // Galaxy A36 pada veloflix: dokumennya disisipi
+                            // berkali-kali dalam hitungan detik dan iframe
+                            // `zxcstream.cc` tidak pernah muncul sama sekali,
+                            // sehingga server itu dibuang watchdog seolah-olah
+                            // rusak.
+                            //
+                            // Untuk host seperti ini WebView memuat sendiri —
+                            // kehilangan penyuntikan kita, tetapi veloflix
+                            // memang membawa subtitle Indonesianya sendiri.
+                            // Hanya dokumen UTAMA-nya yang dibiarkan: frame
+                            // pemutar di dalamnya (zxcstream) TETAP disisipi,
+                            // karena tanpa skrip tidak ada yang bisa melaporkan
+                            // BYTIFY_SIAP — dan server yang tidak bisa
+                            // membuktikan dirinya bekerja selalu dibuang
+                            // watchdog, betapapun sehatnya.
+                            if (!profilUntuk(reqUrl).proksiDokumen) {
+                                return super.shouldInterceptRequest(view, request)
+                            }
                             val mintaDokumen = request?.requestHeaders
                                 ?.entries?.firstOrNull { it.key.equals("Accept", true) }
                                 ?.value.orEmpty().contains("text/html", true)
@@ -2066,11 +2319,12 @@ private fun EmbedVideoStage(
                                             Log.w(EMBED_TAG, "player tidak disisipi (${balasan.code} $tipe)")
                                             return@runCatching null
                                         }
+                                        val skrip = skripUntuk(profilUntuk(alamat))
                                         val titik = badan.indexOf("</head>", ignoreCase = true)
                                         val disisipi = if (titik >= 0) {
-                                            badan.substring(0, titik) + GATE_BYPASS_JS + badan.substring(titik)
+                                            badan.substring(0, titik) + skrip + badan.substring(titik)
                                         } else {
-                                            GATE_BYPASS_JS + badan
+                                            skrip + badan
                                         }
                                         Log.i(EMBED_TAG, "disisipi: $alamat (${badan.length} bait)")
                                         // Frame bersarang yang kita sisipi adalah
@@ -2111,7 +2365,10 @@ private fun EmbedVideoStage(
                             // pemutar modern untuk KONTROLNYA SENDIRI, sehingga
                             // menjalankannya di sana merusak pemutar yang
                             // sebetulnya sehat.
-                            if (!langsung) view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
+                            val kamar = profilUntuk(url)
+                            if (!langsung && kamar.pembersihIklan) {
+                                view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
+                            }
                             // Ketukan otomatis berlaku di KEDUA jalur, tetapi
                             // dengan jeda berbeda. Dugaan lama bahwa pemutar
                             // pihak ketiga selalu berjalan sendiri SALAH:
@@ -2119,11 +2376,19 @@ private fun EmbedVideoStage(
                             // sumbernya sama sekali. Yang benar-benar berbahaya
                             // bukan ketukannya, melainkan mengetuk pemutar yang
                             // sudah berjalan — dan itu dicegah oleh [sudahSiap].
-                            view?.let {
-                                if (langsung) {
-                                    ketukOtomatis(it, sudahMain, 0, sudahSiap, 6000L)
-                                } else {
-                                    ketukOtomatis(it, sudahMain, 0, sudahSiap)
+                            // Dokumen yang tidak diproksikan tetap perlu diurus:
+                            // tinggi iframe pemutarnya dan panduan veloflix.
+                            if (!profilUntuk(url).proksiDokumen) {
+                                val web = view
+                                repeat(20) { ke ->
+                                    web?.postDelayed({
+                                        web.evaluateJavascript(SUNTIK_LUAR_JS, null)
+                                    }, 700L * (ke + 1))
+                                }
+                            }
+                            if (kamar.jedaKetukMs > 0L) {
+                                view?.let {
+                                    ketukOtomatis(it, sudahMain, 0, sudahSiap, kamar.jedaKetukMs)
                                 }
                             }
                         }

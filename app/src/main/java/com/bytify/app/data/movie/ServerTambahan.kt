@@ -73,6 +73,26 @@ private class RuteEmbed(
 
 private val RUTE = listOf(
     RuteEmbed(
+        // PALING DEPAN, dan alasannya terukur: veloflix memutar
+        // `tmdb 1469930` (Tumbal Proyek) — film Indonesia 2026 yang TIDAK
+        // dimiliki vidlink ("We Couldn't Find This Content") dan tidak pernah
+        // selesai dimuat cinesrc. Judul Indonesia adalah justru bagian katalog
+        // yang paling sering kehabisan server.
+        //
+        // Ia juga membawa subtitle Indonesia di pemutarnya sendiri
+        // (`?dubLang=id`), yang muncul sebagai chip "(server)" lewat 3w —
+        // berharga karena OpenSubtitles kosong untuk rilis Indonesia baru.
+        //
+        // Yang dipakai halaman veloflix-nya, BUKAN `zxcstream.cc` yang
+        // disematnya: dibuka langsung, zxcstream mengalihkan diri ke
+        // zxcstream.com, jadi ia memeriksa siapa penyematnya — pola yang sama
+        // dengan apiplayer.ru pada stcine, dan melewatinya berarti berpura-pura
+        // menjadi veloflix.
+        "veloflix",
+        { id -> "https://veloflix.my.id/watch/movie/$id?play=1" },
+        { id, musim, episode -> "https://veloflix.my.id/watch/tv/$id?play=1&s=$musim&e=$episode" },
+    ),
+    RuteEmbed(
         // DIUKUR di peramban, bukan diukur dari kode status saja: film
         // `/embed/movie/27205` dan episode `/embed/tv/1396?s=1&e=1` sama-sama
         // mencapai `readyState 4` dengan sumber `blob:` setelah satu ketukan.

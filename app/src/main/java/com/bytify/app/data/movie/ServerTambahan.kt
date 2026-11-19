@@ -35,6 +35,14 @@ package com.bytify.app.data.movie
  * `player.autoembed.cc` karena itu TIDAK dipasang: domainnya tidak ada, dan
  * nama yang tidak resolve di jaringan juga tidak akan resolve di WebView —
  * menyertakannya hanya menambah satu siklus gagal untuk setiap judul.
+ * `vidcore.io` DIBUANG, bukan diturunkan. Alasannya terukur di Galaxy A36:
+ * ia menyajikan kerangka pemutar (200), jadi pemutar menunggunya sampai ambang
+ * habis, lalu yang tampil layar HITAM dengan kontrolnya sendiri tergambar di
+ * LUAR kotak video. Di peramban, halaman yang sama berhenti di
+ * "FETCHING YOUR CONTENT..." lebih dari 35 detik dengan `readyState` 0 dan nol
+ * permintaan ke API sumbernya, bahkan setelah diketuk. Server yang tidak pernah
+ * memutar apa pun bukan cadangan — ia hanya menunda server berikutnya.
+ *
  * `vidsrc.cc` ditaruh PALING AKHIR, bukan dibuang: 522 adalah origin yang
  * sedang tumbang di belakang Cloudflare, dan itu bisa pulih. Jalankan ulang
  * probe-nya untuk menyegarkan urutan ini.
@@ -85,14 +93,6 @@ private val RUTE = listOf(
         "vidlink",
         { id -> "https://vidlink.pro/movie/$id" },
         { id, musim, episode -> "https://vidlink.pro/tv/$id/$musim/$episode" },
-    ),
-    RuteEmbed(
-        // Tetap dipasang, tetapi SESUDAH yang terbukti berputar: 200-nya nyata,
-        // sumbernya tidak pernah datang. Kalau suatu saat pulih, ia tidak perlu
-        // dipasang ulang — hanya naik urutan.
-        "vidcore",
-        { id -> "https://vidcore.io/movie/$id" },
-        { id, musim, episode -> "https://vidcore.io/tv/$id/$musim/$episode" },
     ),
     RuteEmbed(
         "vidsrc",

@@ -733,6 +733,72 @@ menjatuhkan koneksi, dan hasilnya terbaca seolah storefrontnya tidak ada.
 Dengan jeda dan percobaan ulang, semuanya menjawab. Jangan menyimpulkan sebuah
 storefront mati dari satu kegagalan.
 
+### 3u. Empat sebab server sehat dibuang, semuanya terukur di A36
+
+Server pihak ketiga bukan gagal memutar — ia dibuang oleh penjaga kita sendiri.
+Keempatnya ditemukan pada satu judul (Inception, `lk21-movie-inception-2010`)
+dan masing-masing menyamar sebagai kegagalan yang berbeda.
+
+**1. Watchdog berkunci `kandidat.size`.** Server turunan diturunkan dari
+`watch_aliases` lewat pembacaan database, jadi daftarnya BERTAMBAH beberapa
+detik setelah pemutar terbuka. Kedatangan itu memulai ulang `LaunchedEffect`
+dan menghapus `videoBerjalan` untuk server yang saat itu sedang memutar film.
+Terukur: Inception berjalan di server 1 pada detik ke-5, dibuang pada detik
+ke-18, lalu pemutar menelusuri sampai server ke-6 yang layarnya hitam. Kuncinya
+sekarang `activeEmbedUrl` — alamat aktif hanya berubah kalau servernya memang
+berganti.
+
+**2. Ambang 18 detik tidak sebanding dengan jalur yang menunggu ketukan.**
+Ketukan pertama di jalur langsung sengaja ditunda 6 detik, jadi cinesrc hanya
+punya 12 detik untuk menempelkan sumbernya dan dibuang dengan
+`siap=false, kemajuan=false`. `BATAS_KETUK_MS` (30 detik) berlaku khusus untuk
+server yang dimuat langsung.
+
+**3. Laporan gagal datang BERPASANGAN.** `onReceivedError` lalu
+`onReceivedHttpError` keduanya tiba sebelum recomposition, sehingga penjaga
+`dariUrl == activeEmbedUrl` saja masih meloloskan keduanya — DUA server
+terlompati dalam 11 ms. `sudahDilewati` memastikan satu alamat hanya memajukan
+server sekali.
+
+**4. Popunder iklan dihitung sebagai gerbang Referer yang gagal.** Terukur:
+`navigasi frame utama ditahan: invl.me` enam detik setelah dokumen cinesrc
+(19.711 bait) terkirim utuh. Pembedanya sederhana dan pasti: gerbang Referer
+gagal dengan mengalihkan permintaan DOKUMENNYA, sebelum ada halaman pemutar
+sama sekali. Kalau halamannya sudah kita sisipi (`dokumenUtamaDisisipi`),
+navigasi keluar yang ditahan pasti iklan. Penanda yang sama juga menutup jalur
+galat jaringan, karena galat pada alamat yang dokumennya sudah terkirim adalah
+permintaan kembar atau yang dibatalkan.
+
+Di jalur LANGSUNG, galat yang dihitung hanya galat FRAME UTAMA — di sana
+servernya memang frame utama. Pencocokan lewat URL tetap dipakai di jalur
+pembungkus, karena di sana server hidup di dalam iframe sehingga domain mati
+muncul sebagai galat sub-frame.
+
+Sesudah keempatnya: cinesrc melapor
+`BYTIFY_SIAP rs=4 vid=2592x1080 kotak=384x216@0,0` lalu `film berjalan`, tanpa
+satu pun "pindah server".
+
+**Layar hitam pada pemutar yang SEDANG berjalan: wadahnya, bukan videonya.**
+Terukur sebelum perbaikan: `kotak=384x216@0,-90` — videonya diletakkan 90
+piksel DI ATAS kotak, jadi keluar layar meskipun `readyState 4`. Pemutar modern
+memusatkan video di dalam wadahnya; kalau wadah itu lebih tinggi daripada kotak
+yang kita beri, pemusatan mendorong video DAN kontrolnya ke luar. Inilah juga
+sebab tombol jeda tergambar di atas kotak video pada vidcore.
+
+`pastikanTinggi()` karena itu menjepit tinggi `documentElement`, `body`, dan
+setiap wadah leluhur video yang lebih tinggi daripada viewport. Memaksa posisi
+videonya hanya cadangan terakhir, kalau sesudah dijepit ia masih keluar kotak —
+menjepit wadah menjaga tata letak pemutar tetap utuh, sehingga kontrolnya tetap
+pada tempatnya relatif terhadap video.
+
+**Subtitle berlaku untuk SEMUA server, bukan hanya LK21.** Terbukti di A36 pada
+cinesrc: `kirim subtitle (119856 bait json)` lalu
+`subtitle diterima: 1592 baris; video di sini=1`. Jalur pengirimannya memang
+tidak bergantung server — cue dikirim lewat `postMessage` ke dokumen yang
+memuat `<video>`, dan `GATE_BYPASS_JS` disuntikkan ke SETIAP dokumen HTML.
+Yang dulu menghalanginya bukan subtitlenya, melainkan server yang dibuang
+sebelum sempat memutar.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

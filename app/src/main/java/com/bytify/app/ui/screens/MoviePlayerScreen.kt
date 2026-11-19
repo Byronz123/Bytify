@@ -433,6 +433,21 @@ private const val GATE_BYPASS_JS = """
       var de = document.documentElement, b = document.body;
       if (de && de.clientHeight < 2) de.style.minHeight = h + 'px';
       if (b && b.clientHeight < 2) b.style.minHeight = h + 'px';
+      // Dokumen player DIPAKSA setinggi viewport, bukan hanya diberi
+      // minHeight saat tingginya nol.
+      //
+      // Terlihat di Galaxy A36 pada vidcore: kontrol pemutar (mundur 10
+      // detik, jeda, maju 10 detik, "Now Playing") tergambar DI ATAS kotak
+      // video, bukan di tengahnya. Sebabnya dokumennya lebih tinggi daripada
+      // kotak yang kita beri, sementara kontrolnya ditempatkan relatif
+      // terhadap dokumen — jadi pusat dokumen jatuh di luar kotak. Menyamakan
+      // tinggi dokumen dengan tinggi kotak membuat pusatnya kembali sama.
+      if (de) { de.style.height = h + 'px'; de.style.overflow = 'hidden'; }
+      if (b) {
+        b.style.height = h + 'px';
+        b.style.margin = '0';
+        b.style.overflow = 'hidden';
+      }
       var fr = document.querySelectorAll('iframe');
       for (var i = 0; i < fr.length; i++) {
         if (fr[i].offsetHeight < 2 && fr[i].offsetWidth > 2) {
@@ -445,6 +460,43 @@ private const val GATE_BYPASS_JS = """
       var v = document.querySelector('video');
       if (v && v.videoWidth > 0 && v.clientHeight < 2 && v.clientWidth > 2) {
         v.style.height = Math.round(v.clientWidth * v.videoHeight / v.videoWidth) + 'px';
+      }
+      // WADAH yang lebih tinggi daripada viewport DIJEPIT ke tinggi viewport.
+      //
+      // Inilah sebab layar hitam yang sebenarnya, dan terukur: cinesrc
+      // melaporkan `kotak=384x216@0,-90` — videonya diletakkan 90 piksel DI
+      // ATAS kotak, jadi keluar layar meskipun `readyState 4` dan filmnya
+      // berjalan. Pemutar modern memusatkan video di dalam wadahnya; kalau
+      // wadah itu lebih tinggi daripada yang kita beri, pemusatan itu
+      // mendorong video (dan kontrolnya) ke luar kotak.
+      //
+      // Menjepit wadahnya, bukan memaksa posisi videonya, menjaga tata letak
+      // pemutar tetap utuh: kontrol tetap di tempatnya relatif terhadap video.
+      if (v) {
+        var naik = v.parentElement, langkah = 0;
+        while (naik && langkah < 8) {
+          if (naik.offsetHeight > h + 4) {
+            naik.style.height = h + 'px';
+            naik.style.maxHeight = h + 'px';
+          }
+          naik = naik.parentElement;
+          langkah++;
+        }
+        var kotak = v.getBoundingClientRect();
+        // Kalau SESUDAH dijepit videonya masih keluar kotak, barulah posisinya
+        // dipaksa. Urutan ini penting: menjepit wadah lebih lembut daripada
+        // mencabut video dari tata letaknya.
+        if (kotak.top < -1 || kotak.bottom > h + 1) {
+          v.style.position = 'absolute';
+          v.style.top = '0';
+          v.style.left = '0';
+          v.style.width = '100%';
+          v.style.height = h + 'px';
+          v.style.objectFit = 'contain';
+          if (v.parentElement && getComputedStyle(v.parentElement).position === 'static') {
+            v.parentElement.style.position = 'relative';
+          }
+        }
       }
     } catch (e) {}
   }
@@ -686,6 +738,19 @@ private const val BATAS_TUNGGU_MS = 18_000L
  * benar-benar akan memutar film.
  */
 private const val BATAS_SABAR_MS = 45_000L
+
+/**
+ * Ambang untuk server yang dimuat LANGSUNG (pemutar pihak ketiga).
+ *
+ * Lebih longgar daripada [BATAS_TUNGGU_MS] karena jamnya tidak sebanding:
+ * pemutar seperti vidlink dan cinesrc baru membuat sumbernya SETELAH ada
+ * ketukan, dan ketukan pertama di jalur ini sengaja ditunda 6 detik supaya
+ * tidak mengganggu server yang berjalan sendiri. Terukur di Galaxy A36:
+ * cinesrc dibuang pada detik ke-18 dengan `siap=false, kemajuan=false`,
+ * padahal ia hanya punya 12 detik sejak diketuk. 30 detik memberi jendela
+ * yang sepadan tanpa menahan server yang benar-benar mati terlalu lama.
+ */
+private const val BATAS_KETUK_MS = 30_000L
 
 private fun mediaMimeType(url: String): String? = when (Uri.parse(url).path.orEmpty().substringAfterLast('.', "").lowercase()) {
     "m3u8" -> MimeTypes.APPLICATION_M3U8
@@ -978,6 +1043,8 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // embed saat halaman melaporkan BYTIFY_MAIN, untuk pemutar langsung saat
     // ExoPlayer benar-benar memutar.
     var videoBerjalan by remember(playKey) { mutableStateOf(false) }
+    /** Alamat server yang laporan gagalnya SUDAH dipakai memajukan server. */
+    var sudahDilewati by remember(playKey) { mutableStateOf<String?>(null) }
     DisposableEffect(videoBerjalan) {
         if (videoBerjalan) ModeFloating.daftarkanVideo() else ModeFloating.lepaskanVideo()
         onDispose { ModeFloating.lepaskanVideo() }
@@ -993,10 +1060,21 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // Sinyal BERHASIL sudah ada sejak lama: halaman melaporkan BYTIFY_MAIN
     // begitu <video> betul-betul berjalan. Yang ditambahkan sinyal GAGAL.
     val majuServer: (String?) -> Unit = { dariUrl ->
+        Log.i(
+            EMBED_TAG,
+            "pindah server diminta oleh ${dariUrl ?: "watchdog"}; " +
+                "aktif=$activeEmbedUrl indeks=$indeksServer/${kandidat.size}",
+        )
         // Laporan dari WebView yang sudah ditinggalkan diabaikan. Tanpa penjaga
         // ini satu kegagalan basi bisa melompati server yang baru dipasang,
         // dan daftar kandidat terkuras tanpa pernah dicoba sungguhan.
-        if (dariUrl == null || dariUrl == activeEmbedUrl) {
+        // Satu alamat hanya boleh memajukan server SEKALI. Laporan gagal
+        // datang berpasangan (onReceivedError lalu onReceivedHttpError) dan
+        // keduanya tiba sebelum recomposition, sehingga penjaga
+        // `dariUrl == activeEmbedUrl` saja masih meloloskan keduanya dan dua
+        // server terlompati dalam 11 ms.
+        if ((dariUrl == null || dariUrl == activeEmbedUrl) && dariUrl != sudahDilewati) {
+            sudahDilewati = dariUrl
             if (indeksServer + 1 < kandidat.size) indeksServer += 1 else serverHabis = true
         }
     }
@@ -1005,7 +1083,19 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // pointerInput di BottomBars.kt. Dibaca lewat State supaya selalu terkini.
     val majuTerkini by rememberUpdatedState(majuServer)
 
-    LaunchedEffect(playKey, indeksServer, useEmbedPlayer, kandidat.size) {
+    // Kuncinya ALAMAT server yang aktif, bukan `kandidat.size`.
+    //
+    // Server turunan datang BELAKANGAN — diturunkan dari `watch_aliases` lewat
+    // pembacaan database, jadi daftarnya bertambah beberapa detik setelah
+    // pemutar terbuka. Dengan `kandidat.size` sebagai kunci, kedatangan itu
+    // memulai ulang watchdog dan MENGHAPUS penanda "sudah berjalan" untuk
+    // server yang saat itu sedang memutar film. Terukur di Galaxy A36:
+    // Inception berjalan di server 1 pada detik ke-5, lalu dibuang pada detik
+    // ke-18 dan pemutar menelusuri sampai server ke-6 yang layarnya hitam.
+    //
+    // Alamat aktif hanya berubah kalau servernya memang berganti, jadi
+    // penandanya tidak pernah hilang karena daftar bertambah.
+    LaunchedEffect(playKey, useEmbedPlayer, activeEmbedUrl) {
         if (!useEmbedPlayer || kandidat.isEmpty()) return@LaunchedEffect
         // Server baru berarti belum berjalan dan belum siap. Tanpa reset ini,
         // server yang sempat berhasil membuat watchdog bungkam untuk server
@@ -1023,7 +1113,17 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             delay(500)
             if (videoBerjalan) break
             val lewat = System.currentTimeMillis() - mulai
-            val batas = if (serverSiap || serverKemajuan) BATAS_SABAR_MS else BATAS_TUNGGU_MS
+            // Server yang dimuat langsung menunggu ketukan, jadi jamnya
+            // berjalan lebih lambat. Aturannya sama persis dengan yang dipakai
+            // EmbedVideoStage untuk memutuskan jalur `langsung`.
+            val acuan = serverAktif?.referer
+            val langsungAktif = acuan.isNullOrBlank() ||
+                acuan.equals(serverAktif?.url, ignoreCase = true)
+            val batas = when {
+                serverSiap || serverKemajuan -> BATAS_SABAR_MS
+                langsungAktif -> BATAS_KETUK_MS
+                else -> BATAS_TUNGGU_MS
+            }
             if (lewat >= batas) {
                 Log.w(
                     EMBED_TAG,
@@ -1451,6 +1551,16 @@ private fun EmbedVideoStage(
     // Terukur: anikai melekatkan sumbernya pada detik ke-33.
     val adaFrameDalam = remember(videoUrl) { AtomicBoolean(false) }
 
+    // Apakah dokumen UTAMA server ini sudah kita ambil dan sisipi sendiri.
+    //
+    // Kalau sudah, server itu jelas menjawab dan isinya HTML pemutar — jadi
+    // galat jaringan berikutnya pada alamat yang sama adalah permintaan kembar
+    // atau yang dibatalkan, bukan server yang mati. Terukur di Galaxy A36:
+    // cinesrc dibuang oleh laporan seperti itu meskipun dokumennya sudah
+    // terkirim utuh (19.711 bait). Sejak itu hanya watchdog yang boleh
+    // membuangnya.
+    val dokumenUtamaDisisipi = remember(videoUrl) { AtomicBoolean(false) }
+
     // Apakah ADA frame yang sudah melaporkan sumbernya menempel.
     //
     // Perlu dilacak di sini, bukan di dalam skrip, karena GATE_BYPASS_JS
@@ -1470,9 +1580,23 @@ private fun EmbedVideoStage(
     // yang gagal di antaranya tidak berarti apa-apa. Kedua, begitu film sudah
     // berjalan laporan apa pun diabaikan: setelah video jalan, permintaan yang
     // gagal tidak boleh membuat pemutar berpindah server dan memulai dari nol.
-    val gagalUrlIni: (String?) -> Boolean = { alamat ->
-        !sudahMain.get() && !sudahSiap.get() &&
-            alamat != null && alamat.substringBefore('#').equals(urlUtama, ignoreCase = true)
+    val langsung = referer.isNullOrBlank() || referer.equals(videoUrl, ignoreCase = true)
+
+    val gagalUrlIni: (String?, Boolean) -> Boolean = { alamat, frameUtama ->
+        // Di jalur LANGSUNG, servernya ADALAH frame utama, jadi hanya galat
+        // frame utama yang berarti server itu gagal. Tanpa syarat ini satu
+        // permintaan gagal ke alamat yang sama — pemutar pihak ketiga memuat
+        // dokumennya sendiri lebih dari sekali — membuang server yang sedang
+        // bekerja. Terukur di Galaxy A36: cinesrc dilewati DUA KALI dalam 11 ms
+        // oleh jalur ini, sebelum sempat menempelkan sumbernya.
+        //
+        // Di jalur pembungkus, servernya hidup di dalam iframe sehingga domain
+        // yang mati muncul sebagai galat SUB-frame; di sana URL-nya yang
+        // menentukan, bukan jenis framenya.
+        !sudahMain.get() && !sudahSiap.get() && !adaFrameDalam.get() &&
+            !dokumenUtamaDisisipi.get() &&
+            alamat != null && alamat.substringBefore('#').equals(urlUtama, ignoreCase = true) &&
+            (!langsung || frameUtama)
     }
 
     // Berkas subtitle diambil dengan OkHttp (tidak terkena CORS), diurai jadi
@@ -1525,7 +1649,6 @@ private fun EmbedVideoStage(
      * dibuka sebagai halaman biasa. Jadi untuk server seperti itu alamatnya
      * dimuat apa adanya, persis seperti yang dilakukan situs asalnya.
      */
-    val langsung = referer.isNullOrBlank() || referer.equals(videoUrl, ignoreCase = true)
     val boxMod = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
 
     Box(boxMod.background(Color.Black)) {
@@ -1619,7 +1742,20 @@ private fun EmbedVideoStage(
                                     // setelah siap, watchdog BATAS_SABAR_MS tetap
                                     // menangkapnya — jadi penjaga ini tidak bisa
                                     // membuat pemutar menggantung.
-                                    if (!sudahMain.get() && !sudahSiap.get()) onGagal(videoUrl)
+                                    // Dokumen server yang SUDAH kita sisipi menutup
+                                    // kemungkinan "gerbang Referer gagal": gerbang
+                                    // itu gagal dengan mengalihkan permintaan
+                                    // DOKUMENNYA, sebelum ada halaman pemutar sama
+                                    // sekali. Kalau halamannya sudah terkirim utuh,
+                                    // navigasi keluar yang kita tahan pasti iklan.
+                                    // Terukur di Galaxy A36: cinesrc dibuang oleh
+                                    // popunder `invl.me` enam detik setelah
+                                    // dokumennya (19.711 bait) terkirim.
+                                    if (!sudahMain.get() && !sudahSiap.get() &&
+                                        !dokumenUtamaDisisipi.get()
+                                    ) {
+                                        onGagal(videoUrl)
+                                    }
                                     return true
                                 }
                             }
@@ -1723,6 +1859,8 @@ private fun EmbedVideoStage(
                                             if (adaFrameDalam.compareAndSet(false, true)) {
                                                 view?.post { onKemajuan() }
                                             }
+                                        } else {
+                                            dokumenUtamaDisisipi.set(true)
                                         }
                                         WebResourceResponse(
                                             "text/html",
@@ -1784,7 +1922,9 @@ private fun EmbedVideoStage(
                             // Terukur: player.autoembed.cc tidak resolve sama
                             // sekali, dan tanpa jalur ini server seperti itu
                             // baru dilewati setelah 18 detik penuh.
-                            if (gagalUrlIni(request?.url?.toString())) onGagal(videoUrl)
+                            if (gagalUrlIni(request?.url?.toString(), request?.isForMainFrame == true)) {
+                                onGagal(videoUrl)
+                            }
                         }
 
                         override fun onReceivedHttpError(
@@ -1796,7 +1936,9 @@ private fun EmbedVideoStage(
                             Log.w(EMBED_TAG, "HTTP ${errorResponse?.statusCode} pada ${request?.url}")
                             // Terukur: vidsrc.cc menjawab 522 (origin tumbang
                             // di belakang Cloudflare) untuk 60 dari 60 judul.
-                            if (gagalUrlIni(request?.url?.toString())) onGagal(videoUrl)
+                            if (gagalUrlIni(request?.url?.toString(), request?.isForMainFrame == true)) {
+                                onGagal(videoUrl)
+                            }
                         }
                     }
                     // Alamat halaman film dimuat, lalu dicegat di atas dan dijawab

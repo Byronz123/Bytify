@@ -901,6 +901,9 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // Server yang sudah menempelkan sumber ke elemen video. Dipakai watchdog
     // untuk memilih ambang sabar alih-alih ambang biasa.
     var serverSiap by remember(playKey, videoUrl) { mutableStateOf(false) }
+    // Server sedang merakit pemutarnya (frame bersarang sudah dimuat), walau
+    // sumbernya belum menempel. Bukti kemajuan, bukan bukti keberhasilan.
+    var serverKemajuan by remember(playKey, videoUrl) { mutableStateOf(false) }
     val serverAktif = kandidat.getOrNull(indeksServer)
     val activeEmbedUrl = serverAktif?.url ?: videoUrl
     val refererAktif = serverAktif?.referer ?: movie.sourceUrl
@@ -969,6 +972,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // penggantinya.
         videoBerjalan = false
         serverSiap = false
+        serverKemajuan = false
 
         // Ambangnya dibaca ULANG tiap putaran, bukan ditetapkan di awal:
         // sebuah server bisa melaporkan sumbernya menempel di detik ke-15, dan
@@ -979,12 +983,12 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             delay(500)
             if (videoBerjalan) break
             val lewat = System.currentTimeMillis() - mulai
-            val batas = if (serverSiap) BATAS_SABAR_MS else BATAS_TUNGGU_MS
+            val batas = if (serverSiap || serverKemajuan) BATAS_SABAR_MS else BATAS_TUNGGU_MS
             if (lewat >= batas) {
                 Log.w(
                     EMBED_TAG,
                     "server '${serverAktif?.nama}' tak berjalan dalam $lewat ms " +
-                        "(siap=$serverSiap, ambang=$batas); dilewati",
+                        "(siap=$serverSiap, kemajuan=$serverKemajuan, ambang=$batas); dilewati",
                 )
                 majuServer(activeEmbedUrl)
                 break
@@ -1147,6 +1151,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
+                    onKemajuan = { serverKemajuan = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1175,6 +1180,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
+                    onKemajuan = { serverKemajuan = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1219,6 +1225,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onMulaiBerjalan = { videoBerjalan = true },
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
+                    onKemajuan = { serverKemajuan = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1378,11 +1385,31 @@ private fun EmbedVideoStage(
     onGagal: (String) -> Unit = {},
     /** Sumber sudah menempel di elemen video; server ini layak ditunggu. */
     onSiap: () -> Unit = {},
+    /** Frame pemutar bersarang sudah dimuat; server ini sedang bekerja. */
+    onKemajuan: () -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
     // Referer, lalu tahan navigasi yang keluar dari domain player.
     val sudahMain = remember(videoUrl) { AtomicBoolean(false) }
+
+    // Alamat server TANPA fragmen.
+    //
+    // Peramban tidak pernah mengirim fragmen dalam permintaan, jadi
+    // membandingkan URL permintaan dengan [videoUrl] apa adanya TIDAK PERNAH
+    // cocok untuk server yang kuncinya ada di fragmen — anikai memakai
+    // `/watch#<seal>.<episode>.<server>.<audio>`. Akibatnya terukur di Galaxy
+    // A36: dokumen UTAMA anikai dikira frame bersarang, sehingga pengalihan
+    // dan galat jaringan pada halaman itu tidak pernah dilaporkan gagal.
+    val urlUtama = remember(videoUrl) { videoUrl.substringBefore('#').lowercase() }
+
+    // Apakah ADA frame bersarang yang dokumennya sudah kita sisipi.
+    //
+    // Pada anikai elemen <video> hidup di dalam iframe megaplay, bukan di
+    // dokumen luar — jadi dokumen luar SELALU melapor "tak ada video" dan
+    // ambang 18 detik membuang server yang sebetulnya sedang merakit pemutar.
+    // Terukur: anikai melekatkan sumbernya pada detik ke-33.
+    val adaFrameDalam = remember(videoUrl) { AtomicBoolean(false) }
 
     // Apakah ADA frame yang sudah melaporkan sumbernya menempel.
     //
@@ -1405,7 +1432,7 @@ private fun EmbedVideoStage(
     // gagal tidak boleh membuat pemutar berpindah server dan memulai dari nol.
     val gagalUrlIni: (String?) -> Boolean = { alamat ->
         !sudahMain.get() && !sudahSiap.get() &&
-            alamat != null && alamat.equals(videoUrl, ignoreCase = true)
+            alamat != null && alamat.substringBefore('#').equals(urlUtama, ignoreCase = true)
     }
 
     // Berkas subtitle diambil dengan OkHttp (tidak terkena CORS), diurai jadi
@@ -1493,7 +1520,9 @@ private fun EmbedVideoStage(
                                 sudahSiap.set(true)
                                 onSiap()
                             } else if (pesan.contains("BYTIFY_DIAM")) {
-                                if (!sudahMain.get() && !sudahSiap.get()) {
+                                if (!sudahMain.get() && !sudahSiap.get() &&
+                                    !adaFrameDalam.get()
+                                ) {
                                     Log.w(EMBED_TAG, "tidak ada elemen video sama sekali: $videoUrl")
                                     onGagal(videoUrl)
                                 }
@@ -1600,10 +1629,10 @@ private fun EmbedVideoStage(
                                 ?.entries?.firstOrNull { it.key.equals("Accept", true) }
                                 ?.value.orEmpty().contains("text/html", true)
                             if (request != null && request.method.equals("GET", true) &&
-                                (reqUrl == videoUrl.lowercase() || mintaDokumen)
+                                (reqUrl == urlUtama || mintaDokumen)
                             ) {
                                 val alamat = request.url.toString()
-                                val asal = if (reqUrl == videoUrl.lowercase()) referer else videoUrl
+                                val asal = if (reqUrl == urlUtama) referer else videoUrl
                                 runCatching {
                                     val pembangun = OkRequest.Builder().url(alamat)
                                         .header("User-Agent", EMBED_USER_AGENT)
@@ -1622,7 +1651,7 @@ private fun EmbedVideoStage(
                                             // berarti apa-apa. shouldIntercept
                                             // berjalan di utas latar, jadi
                                             // laporannya dikirim lewat post().
-                                            if (reqUrl == videoUrl.lowercase() &&
+                                            if (reqUrl == urlUtama &&
                                                 !sudahMain.get() && !sudahSiap.get()
                                             ) {
                                                 view?.post { onGagal(videoUrl) }
@@ -1644,6 +1673,17 @@ private fun EmbedVideoStage(
                                             GATE_BYPASS_JS + badan
                                         }
                                         Log.i(EMBED_TAG, "disisipi: $alamat (${badan.length} bait)")
+                                        // Frame bersarang yang kita sisipi adalah
+                                        // BUKTI server ini sedang merakit pemutar.
+                                        // Sejak saat itu ia pantas ditunggu selama
+                                        // server yang sudah melekatkan sumber.
+                                        if (!alamat.substringBefore('#')
+                                                .equals(urlUtama, ignoreCase = true)
+                                        ) {
+                                            if (adaFrameDalam.compareAndSet(false, true)) {
+                                                view?.post { onKemajuan() }
+                                            }
+                                        }
                                         WebResourceResponse(
                                             "text/html",
                                             "UTF-8",

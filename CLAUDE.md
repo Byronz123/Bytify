@@ -789,6 +789,30 @@ Jebakan saat memanennya: `@graph` juga memuat simpul `WebSite` yang
 `alternateName`-nya "AniKai" — nama situsnya sendiri. Tanpa menyaring
 `@type`, setiap entri memakai nama itu. Saring ke TVSeries/Movie/TVSeason.
 
+**Alamat server yang kuncinya ada di FRAGMEN memutus tiga penjaga sekaligus.**
+anikai memakai `.../watch#<seal>.<episode>.<server>.<audio>`, sementara peramban
+TIDAK PERNAH mengirim fragmen dalam permintaan jaringan. Akibatnya
+`reqUrl == videoUrl.lowercase()` tidak pernah cocok, dan dokumen UTAMA anikai
+dikira frame bersarang: pengalihan keluar domain tidak dilaporkan gagal, galat
+jaringan pada halamannya tidak memicu failover, dan Referer-nya salah.
+Perbandingannya sekarang memakai `urlUtama` = `videoUrl.substringBefore('#')`.
+
+**Frame pemutar bersarang adalah BUKTI KEMAJUAN, dan tanpa itu anikai dibuang
+di 18 detik.** Elemen `<video>` anikai hidup di dalam iframe megaplay, jadi
+dokumen LUAR selalu melapor `BYTIFY_DIAM` ("tak ada video") dan ambang
+`BATAS_TUNGGU_MS` menghabisinya. Terukur di Galaxy A36: satu jalan anikai baru
+melekatkan sumbernya pada detik ke-33 — dilewati pada detik ke-18, padahal ia
+satu-satunya kandidat (server turunan TMDB dilewati oleh penjaga musim 3j),
+sehingga pemutar menyatakan server habis atas server yang sedang berhasil.
+Sekarang `adaFrameDalam` ditandai saat dokumen frame bersarang disisipi: DIAM
+diabaikan, dan ambangnya naik ke `BATAS_SABAR_MS`. Sesudahnya: 4 detik dari
+tombol ke `film berjalan`.
+
+**Subtitle Indonesia anime TERBUKTI di A36 dari produksi.** Jujutsu Kaisen E1:
+`subtitle anime: tmdb=95479 musim=1 ep=1 hasil=2 bahasa=[id, en]`, 389 baris
+cue terkirim ke frame anak, teks "Aku menulisnya ulang." tampil di layar.
+tmdbId dan season-nya datang dari `anime_servers.json`, bukan `watch_aliases`.
+
 ### 3q. Anime sepenuhnya milik anikai — id, katalog, server
 
 AniList DIBUANG dari anime: bukan lagi sumber metadata, bukan lagi ruang id.

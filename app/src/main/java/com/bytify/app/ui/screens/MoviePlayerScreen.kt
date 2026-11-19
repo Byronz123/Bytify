@@ -99,6 +99,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
 import java.io.ByteArrayInputStream
@@ -492,16 +494,24 @@ private const val GATE_BYPASS_JS = """
         // Kalau SESUDAH dijepit videonya masih keluar kotak, barulah posisinya
         // dipaksa. Urutan ini penting: menjepit wadah lebih lembut daripada
         // mencabut video dari tata letaknya.
-        if (kotak.top < -1 || kotak.bottom > h + 1) {
-          v.style.position = 'absolute';
+        if (kotak.top < -1 || kotak.bottom > h + 1 || kotak.height < 2) {
+          // `fixed`, bukan `absolute`: `absolute` masih mengikuti leluhur
+          // berposisi, dan di vidlink leluhur itulah yang menggeser videonya.
+          // Terukur di Galaxy A36: vidlink melapor `rs=4` dan `film berjalan`
+          // sementara layarnya HITAM, dengan `kotak=384x216@0,18`.
+          //
+          // zIndex setinggi mungkin karena pemutar menaruh poster dan lapisan
+          // kontrolnya DI ATAS video; begitu videonya dicabut dari tata letak,
+          // lapisan itu menutupinya.
+          v.style.position = 'fixed';
           v.style.top = '0';
           v.style.left = '0';
-          v.style.width = '100%';
+          v.style.width = '100vw';
           v.style.height = h + 'px';
           v.style.objectFit = 'contain';
-          if (v.parentElement && getComputedStyle(v.parentElement).position === 'static') {
-            v.parentElement.style.position = 'relative';
-          }
+          v.style.zIndex = '2147483646';
+          v.style.background = '#000';
+          if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
         }
       }
     } catch (e) {}
@@ -638,8 +648,54 @@ private const val GATE_BYPASS_JS = """
     var k = siapkanKotak();
     if (k.textContent !== teks) k.textContent = teks;
   }
+  // ---- Trek subtitle MILIK SERVER ----
+  //
+  // Sumber subtitle ketiga, dan untuk film Indonesia sering satu-satunya:
+  // OpenSubtitles tidak punya apa pun untuk rilis Indonesia baru (diukur:
+  // `tmdb 1469930` hanya punya satu berkas, berbahasa Inggris; `tmdb 1525059`
+  // dan `tmdb 1589663` nol), sementara aliran dari penyedia kerap sudah
+  // membawa treknya sendiri di dalam manifes.
+  //
+  // Yang dilaporkan hanya trek bertipe subtitle/caption, dan hanya dari frame
+  // yang benar-benar memegang videonya.
+  var trekTerlapor = '';
+  function lihatTrek(){
+    try {
+      var v = cariVideo();
+      if (!v || !v.textTracks) return;
+      var keluar = [];
+      for (var i = 0; i < v.textTracks.length; i++) {
+        var t = v.textTracks[i];
+        if (t.kind !== 'subtitles' && t.kind !== 'captions') continue;
+        keluar.push({i: i, lang: t.language || '', label: t.label || ''});
+      }
+      if (!keluar.length) return;
+      var sidik = JSON.stringify(keluar);
+      if (sidik === trekTerlapor) return;
+      trekTerlapor = sidik;
+      console.log('BYTIFY_TREK:' + sidik);
+    } catch (e) {}
+  }
+  setInterval(lihatTrek, 1500);
+
+  function pakaiTrek(nomor){
+    try {
+      var v = cariVideo();
+      if (!v || !v.textTracks) return;
+      for (var i = 0; i < v.textTracks.length; i++) {
+        v.textTracks[i].mode = (i === nomor) ? 'showing' : 'disabled';
+      }
+    } catch (e) {}
+  }
+
   window.addEventListener('message', function(ev){
     try {
+      if (ev.data && typeof ev.data.bytifyTrek === 'number') {
+        pakaiTrek(ev.data.bytifyTrek);
+        for (var j = 0; j < window.frames.length; j++) {
+          try { window.frames[j].postMessage(ev.data, '*'); } catch (e) {}
+        }
+      }
       if (ev.data && ev.data.bytifySub) {
         cueSub = ev.data.bytifySub;
         var alamatFrame = [].slice.call(document.querySelectorAll('iframe'))
@@ -743,6 +799,20 @@ private val EMBED_CLEANUP_JS = """
  * tidak membawa halaman filmnya dan mengalihkan ke beranda, sementara embed
  * pihak ketiga berkunci TMDB id memakai alamatnya sendiri.
  */
+/**
+ * Satu trek subtitle yang dibawa ALIRAN SERVER, bukan katalog atau
+ * OpenSubtitles.
+ *
+ * Nomornya indeks di `video.textTracks`, jadi hanya berlaku selama dokumen
+ * pemutarnya hidup — tidak disimpan dan tidak diterbitkan.
+ */
+@Serializable
+data class TrekServer(
+    val i: Int = 0,
+    val lang: String = "",
+    val label: String = "",
+)
+
 private data class PilihanServer(
     val nama: String,
     val url: String,
@@ -1042,6 +1112,10 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     // Server sedang merakit pemutarnya (frame bersarang sudah dimuat), walau
     // sumbernya belum menempel. Bukti kemajuan, bukan bukti keberhasilan.
     var serverKemajuan by remember(playKey, videoUrl) { mutableStateOf(false) }
+    // Trek subtitle yang dibawa server yang sedang aktif. Dikosongkan tiap
+    // ganti server, karena indeksnya hanya berlaku di dokumen pemutar itu.
+    var trekServer by remember(playKey, videoUrl) { mutableStateOf<List<TrekServer>>(emptyList()) }
+    var trekAktif by remember(playKey, videoUrl) { mutableStateOf<Int?>(null) }
     val serverAktif = kandidat.getOrNull(indeksServer)
     val activeEmbedUrl = serverAktif?.url ?: videoUrl
     val refererAktif = serverAktif?.referer ?: movie.sourceUrl
@@ -1136,6 +1210,8 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         videoBerjalan = false
         serverSiap = false
         serverKemajuan = false
+        trekServer = emptyList()
+        trekAktif = null
 
         // Ambangnya dibaca ULANG tiap putaran, bukan ditetapkan di awal:
         // sebuah server bisa melaporkan sumbernya menempel di detik ke-15, dan
@@ -1325,6 +1401,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
+                    onTrek = { trekServer = it },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1354,6 +1431,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
+                    onTrek = { trekServer = it },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1399,6 +1477,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onGagal = { majuTerkini(it) },
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
+                    onTrek = { trekServer = it },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1459,7 +1538,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             )
         }
 
-        if (useEmbedPlayer && subtitles.isNotEmpty()) {
+        if (useEmbedPlayer && (subtitles.isNotEmpty() || trekServer.isNotEmpty())) {
             Text(
                 "Subtitle",
                 style = MaterialTheme.typography.labelLarge,
@@ -1474,11 +1553,47 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 val pilihan = listOf<Pair<String, String?>>("Mati" to null) +
                     subtitles.map { (it.label.ifBlank { it.lang.uppercase() }) to it.url }
                 pilihan.forEach { (nama, alamat) ->
-                    val aktif = alamat == activeSubUrl
+                    val aktif = alamat == activeSubUrl && trekAktif == null
                     FilterChip(
                         selected = aktif,
-                        onClick = { activeSubUrl = alamat },
+                        onClick = {
+                            activeSubUrl = alamat
+                            // Mematikan trek server saat memilih subtitle kita
+                            // sendiri; dua lapisan teks sekaligus tidak terbaca.
+                            if (trekAktif != null) {
+                                trekAktif = null
+                                webEmbed?.evaluateJavascript(
+                                    "window.postMessage({bytifyTrek: -1}, '*')", null,
+                                )
+                            }
+                        },
                         label = { Text(nama) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = Color.LightGray,
+                            selectedContainerColor = BytifyColors.Gold,
+                            selectedLabelColor = Color.Black,
+                        ),
+                    )
+                }
+                // Trek yang dibawa ALIRAN SERVER. Untuk film Indonesia ini
+                // sering satu-satunya subtitle yang ada: OpenSubtitles belum
+                // punya entri untuk rilis Indonesia baru (terukur: 0 berkas
+                // untuk `tmdb 1525059` dan `tmdb 1589663`), sementara
+                // alirannya sendiri kerap sudah membawa treknya.
+                trekServer.forEach { trek ->
+                    val nama = trek.label.ifBlank { trek.lang.uppercase() }
+                        .ifBlank { "Trek ${trek.i + 1}" }
+                    FilterChip(
+                        selected = trekAktif == trek.i,
+                        onClick = {
+                            trekAktif = trek.i
+                            activeSubUrl = null
+                            webEmbed?.evaluateJavascript(
+                                "window.postMessage({bytifyTrek: ${trek.i}}, '*')", null,
+                            )
+                        },
+                        label = { Text("$nama (server)") },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = Color.Transparent,
                             labelColor = Color.LightGray,
@@ -1560,6 +1675,8 @@ private fun EmbedVideoStage(
     onSiap: () -> Unit = {},
     /** Frame pemutar bersarang sudah dimuat; server ini sedang bekerja. */
     onKemajuan: () -> Unit = {},
+    /** Trek subtitle yang dibawa server ini sendiri. */
+    onTrek: (List<TrekServer>) -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
@@ -1715,6 +1832,20 @@ private fun EmbedVideoStage(
                                 Log.i(EMBED_TAG, "server menyiapkan sumber: $pesan")
                                 sudahSiap.set(true)
                                 onSiap()
+                            } else if (pesan.contains("BYTIFY_TREK:")) {
+                                // Trek subtitle milik server. Untuk film
+                                // Indonesia ini sering satu-satunya sumber,
+                                // karena OpenSubtitles belum punya apa pun
+                                // untuk rilis baru.
+                                val isi = pesan.substringAfter("BYTIFY_TREK:").trim()
+                                val baris = runCatching {
+                                    Json { ignoreUnknownKeys = true }
+                                        .decodeFromString<List<TrekServer>>(isi)
+                                }.getOrDefault(emptyList())
+                                if (baris.isNotEmpty()) {
+                                    Log.i(EMBED_TAG, "trek server: $isi")
+                                    onTrek(baris)
+                                }
                             } else if (pesan.contains("BYTIFY_DIAM")) {
                                 if (!sudahMain.get() && !sudahSiap.get() &&
                                     !adaFrameDalam.get()

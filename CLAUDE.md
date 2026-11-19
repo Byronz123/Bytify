@@ -840,6 +840,49 @@ subtitle di OpenSubtitles, sementara rilis Indonesia 2026 belum diunggah siapa
 pun. Tidak ada yang bisa diperbaiki di kode untuk judul yang sumbernya memang
 kosong.
 
+### 3w. Sumber subtitle KETIGA: trek milik aliran server
+
+Subtitle Bytify punya dua sumber: katalog dan OpenSubtitles. Keduanya kosong
+untuk rilis Indonesia baru, dan itu diukur, bukan diduga:
+
+| TMDB id | judul | OpenSubtitles |
+|---|---|---|
+| 1469930 | Tumbal Proyek (2026) | 1 berkas, Inggris |
+| 1525059 | Tiba Tiba Setan (2026) | 0 |
+| 1589663 | Yang Lain Boleh Hilang… (2026) | 0 |
+
+Fallback pencarian judul SUDAH DICOBA dan ditolak: pada contoh 14 film
+Indonesia acak, pencocokan KETAT (judul ternormalkan sama persis + tahun sama)
+memberi **nol** tambahan, sementara pencarian longgar memulangkan film lain —
+"Arwah Tumbal Nyai (2020)" untuk kueri "Tumbal Proyek". Memasangnya berarti
+menampilkan subtitle film yang salah, yang dilarang 3h.
+
+Yang tersisa, dan kini dipakai: **trek yang dibawa aliran penyedia sendiri**.
+`GATE_BYPASS_JS` membaca `video.textTracks` dari frame yang memegang videonya,
+melaporkannya sebagai `BYTIFY_TREK:` + JSON, dan aplikasi menampilkannya
+sebagai chip bertanda "(server)". Memilihnya mengirim `{bytifyTrek: <i>}` lewat
+`postMessage` — jalur yang sama dengan cue, jadi frame bersarang ikut
+terjangkau. Memilih subtitle kita sendiri mematikan trek server, karena dua
+lapisan teks sekaligus tidak terbaca.
+
+Terukur di Galaxy A36 pada Tumbal Proyek:
+`trek server: [{"i":0,"lang":"","label":"Spanish"},{"i":1,"lang":"","label":"English"}]`.
+Jadi untuk judul itu penyedianya pun tidak punya Indonesia — tetapi jalurnya
+kini ada, dan setiap judul yang treknya memang berbahasa Indonesia akan
+langsung tampil tanpa perubahan kode lagi.
+
+Nomor trek adalah indeks `textTracks`, jadi hanya berlaku selama dokumen
+pemutar itu hidup. Ia TIDAK disimpan dan TIDAK diterbitkan, dan dikosongkan
+setiap kali server berganti.
+
+**vidlink: berjalan tetapi TIDAK TERLIHAT.** Terukur sebelum perbaikan:
+`BYTIFY_SIAP rs=4 vid=1920x1080 kotak=384x216@0,18` dan `film berjalan`,
+sementara layarnya hitam. Menjepit wadah saja tidak cukup — `position:absolute`
+masih mengikuti leluhur berposisi, dan di vidlink leluhur itulah yang menggeser
+videonya, sementara poster dan lapisan kontrol menutupinya. Yang bekerja
+`position:fixed` di sudut kiri-atas dengan `zIndex` tertinggi. Sesudahnya
+`kotak=384x216@0,0` dan gambar "LEGENDARY PICTURES" tampil.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

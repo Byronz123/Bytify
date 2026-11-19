@@ -406,12 +406,18 @@ private const val GATE_BYPASS_JS = """
       if (document.querySelector('video')) return;
       var t = (document.body ? document.body.innerText : '') || '';
       if (t.length > 2500) return;
-      if (/no server could play|no sources? found|no stream found|video not found|media not found|title not available/i.test(t)) {
+      // Kalimat yang dipakai penyedia sungguhan ketika judulnya memang tidak
+      // ada di katalog mereka. Diamati langsung:
+      //   vidlink.pro/movie/1469930 -> "We Couldn't Find This Content ."
+      // Film Indonesia sering tidak ada di penyedia internasional, dan tanpa
+      // pola ini pemutar menunggu ambang penuh untuk sesuatu yang sudah
+      // dijawab penyedianya dalam dua detik.
+      if (/no server could play|no sources? found|no stream found|video not found|media not found|title not available|could ?n.?t find this content|content not found|not available in your region/i.test(t)) {
         console.log('BYTIFY_GAGAL');
       }
     } catch (e) {}
   }
-  [4500, 10000, 15000].forEach(function(ms){ setTimeout(cekTakAdaSumber, ms); });
+  [2500, 4500, 8000, 12000, 18000].forEach(function(ms){ setTimeout(cekTakAdaSumber, ms); });
 
   // ---- Penjaga tinggi frame ----
   //
@@ -502,6 +508,33 @@ private const val GATE_BYPASS_JS = """
   }
   setInterval(pastikanTinggi, 400);
   window.addEventListener('resize', pastikanTinggi);
+
+  // ---- Sumber MENEMPEL tetapi tidak pernah membawa data ----
+  //
+  // Keadaan ketiga, di antara SIAP dan DIAM, dan yang paling membuang waktu.
+  // Diamati pada cinesrc untuk film Indonesia `tmdb-1469930`: `currentSrc`
+  // sudah berisi `blob:`, `networkState` 2 (sedang memuat), tetapi setelah
+  // 36 detik `readyState` tetap 0 dan `buffered.length` tetap 0. Sumbernya
+  // ada di katalog penyedia, alirannya tidak.
+  //
+  // Tanpa pemeriksaan ini server seperti itu menahan ambang penuh, padahal
+  // jawabannya sudah pasti sejak detik ke-20: tidak ada satu bait pun yang
+  // datang.
+  var lapornyaGagal = false;
+  function cekSumberMandek(){
+    try {
+      if (lapornyaGagal) return;
+      var v = cariVideo();
+      if (!v) return;
+      var punyaSumber = !!(v.currentSrc || v.src ||
+        (v.querySelector && v.querySelector('source')));
+      if (!punyaSumber) return;
+      if (v.readyState > 0 || (v.buffered && v.buffered.length > 0)) return;
+      lapornyaGagal = true;
+      console.log('BYTIFY_GAGAL');
+    } catch (e) {}
+  }
+  [20000, 26000].forEach(function(ms){ setTimeout(cekSumberMandek, ms); });
 
   // ---- Deteksi KEMAJUAN, bukan sekadar "sudah berputar" ----
   //

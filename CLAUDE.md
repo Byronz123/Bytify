@@ -799,6 +799,47 @@ memuat `<video>`, dan `GATE_BYPASS_JS` disuntikkan ke SETIAP dokumen HTML.
 Yang dulu menghalanginya bukan subtitlenya, melainkan server yang dibuang
 sebelum sempat memutar.
 
+### 3v. Penyedia gagal karena KATALOGNYA, bukan karena rusak
+
+Koreksi atas kesimpulan yang terlalu luas di 3u: `vidcore.io` sempat dibuang
+dengan alasan "tidak pernah memutar apa pun". Itu salah. Ia gagal untuk
+`tmdb 27205` (Inception) TETAPI MEMUTAR `tmdb 1469930` (Tumbal Proyek) di
+Galaxy A36 — `BYTIFY_SIAP rs=4 vid=1920x1080 kotak=384x216@0,0`, gambar
+bergerak. Satu judul yang gagal tidak membuktikan penyedianya mati; yang
+menentukan apakah ia punya judul YANG SEDANG DIBUKA. Jadi yang diubah
+urutannya, bukan keberadaannya.
+
+Dua jawaban "tidak punya" yang kini dikenali dan membuat failover berpindah
+dalam hitungan detik, bukan menunggu ambang penuh:
+
+- **Halaman menyatakannya.** `vidlink.pro/movie/1469930` menjawab
+  "We Couldn't Find This Content ." Polanya ditambahkan ke
+  `cekTakAdaSumber()`, dan pemeriksaannya dimulai sejak detik ke-2,5.
+- **Sumber menempel tetapi tidak pernah membawa data.** Diamati pada cinesrc
+  untuk judul yang sama: `currentSrc` berisi `blob:`, `networkState` 2, tetapi
+  setelah 36 detik `readyState` tetap 0 dan `buffered.length` tetap 0.
+  `cekSumberMandek()` melaporkannya di detik ke-20 — keadaan ketiga, di antara
+  SIAP dan DIAM, dan yang paling membuang waktu.
+
+**Subtitle Indonesia untuk film Indonesia baru memang TIDAK ADA, dan itu bukan
+bug.** Diukur lewat API produksi:
+
+| TMDB id | judul | totalFound | bahasa |
+|---|---|---|---|
+| 27205 | Inception | 50 | id, en |
+| 1061474 | — | 26 | id, en |
+| 1469930 | Tumbal Proyek (2026) | 1 | en saja |
+| 1525059 | Tiba Tiba Setan (2026) | 0 | — |
+| 1589663 | Yang Lain Boleh Hilang… (2026) | 0 | — |
+
+Daftar subtitle dibangun PER JUDUL, bukan per server, jadi server mana pun
+yang dipilih mendapat daftar yang sama — terbukti di A36: Inception di cinesrc
+menampilkan chip Indonesia dan menerima 1.592 cue. Yang membedakan film LK21
+bukan servernya, melainkan judulnya: film lama dan internasional sudah punya
+subtitle di OpenSubtitles, sementara rilis Indonesia 2026 belum diunggah siapa
+pun. Tidak ada yang bisa diperbaiki di kode untuk judul yang sumbernya memang
+kosong.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

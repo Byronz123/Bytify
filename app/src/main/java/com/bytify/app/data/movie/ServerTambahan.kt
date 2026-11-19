@@ -27,21 +27,24 @@ package com.bytify.app.data.movie
  * |---------------------|------------------|-------------------------------|
  * | cinesrc.st          | 40/40            | HTTP 200; TERBUKTI berputar   |
  * | vidlink.pro         | 60/60            | HTTP 200; TERBUKTI berputar   |
- * | vidcore.io          | 60/60            | HTTP 200, tetapi TIDAK pernah |
- * |                     |                  | selesai memuat sumbernya      |
+ * | vidcore.io          | 60/60            | HTTP 200; berputar untuk      |
+ * |                     |                  | sebagian judul saja           |
  * | vidsrc.cc           | 0/60             | HTTP 522 — origin-nya mati    |
  * | player.autoembed.cc | 0/60             | DNS tidak resolve sama sekali |
  *
  * `player.autoembed.cc` karena itu TIDAK dipasang: domainnya tidak ada, dan
  * nama yang tidak resolve di jaringan juga tidak akan resolve di WebView —
  * menyertakannya hanya menambah satu siklus gagal untuk setiap judul.
- * `vidcore.io` DIBUANG, bukan diturunkan. Alasannya terukur di Galaxy A36:
- * ia menyajikan kerangka pemutar (200), jadi pemutar menunggunya sampai ambang
- * habis, lalu yang tampil layar HITAM dengan kontrolnya sendiri tergambar di
- * LUAR kotak video. Di peramban, halaman yang sama berhenti di
- * "FETCHING YOUR CONTENT..." lebih dari 35 detik dengan `readyState` 0 dan nol
- * permintaan ke API sumbernya, bahkan setelah diketuk. Server yang tidak pernah
- * memutar apa pun bukan cadangan — ia hanya menunda server berikutnya.
+ * `vidcore.io` sempat DIBUANG, lalu DIKEMBALIKAN, dan koreksinya penting:
+ * ia gagal untuk `tmdb 27205` (Inception) — berhenti di
+ * "FETCHING YOUR CONTENT..." lebih dari 35 detik dengan `readyState` 0 —
+ * tetapi MEMUTAR `tmdb 1469930` (Tumbal Proyek) di Galaxy A36. Jadi yang benar
+ * bukan "vidcore tidak pernah memutar", melainkan "katalognya tidak sama
+ * dengan katalog kita". Satu judul yang gagal tidak membuktikan penyedianya
+ * mati; yang menentukan apakah ia punya judul YANG SEDANG DIBUKA.
+ *
+ * Karena itu urutannya saja yang berubah, bukan keberadaannya — dan ambang
+ * waktu yang tepat jauh lebih berharga daripada membuang penyedia.
  *
  * `vidsrc.cc` ditaruh PALING AKHIR, bukan dibuang: 522 adalah origin yang
  * sedang tumbang di belakang Cloudflare, dan itu bisa pulih. Jalankan ulang
@@ -93,6 +96,13 @@ private val RUTE = listOf(
         "vidlink",
         { id -> "https://vidlink.pro/movie/$id" },
         { id, musim, episode -> "https://vidlink.pro/tv/$id/$musim/$episode" },
+    ),
+    RuteEmbed(
+        // Memutar `tmdb 1469930` di Galaxy A36, gagal untuk `tmdb 27205`.
+        // Ditaruh sesudah yang lebih sering berhasil, bukan dibuang.
+        "vidcore",
+        { id -> "https://vidcore.io/movie/$id" },
+        { id, musim, episode -> "https://vidcore.io/tv/$id/$musim/$episode" },
     ),
     RuteEmbed(
         "vidsrc",

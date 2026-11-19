@@ -25,8 +25,10 @@ package com.bytify.app.data.movie
  *
  * | penyedia            | kerangka pemutar | catatan                       |
  * |---------------------|------------------|-------------------------------|
- * | vidlink.pro         | 60/60            | HTTP 200, ~80 KB              |
- * | vidcore.io          | 60/60            | HTTP 200, ~43 KB              |
+ * | cinesrc.st          | 40/40            | HTTP 200; TERBUKTI berputar   |
+ * | vidlink.pro         | 60/60            | HTTP 200; TERBUKTI berputar   |
+ * | vidcore.io          | 60/60            | HTTP 200, tetapi TIDAK pernah |
+ * |                     |                  | selesai memuat sumbernya      |
  * | vidsrc.cc           | 0/60             | HTTP 522 — origin-nya mati    |
  * | player.autoembed.cc | 0/60             | DNS tidak resolve sama sekali |
  *
@@ -36,6 +38,13 @@ package com.bytify.app.data.movie
  * `vidsrc.cc` ditaruh PALING AKHIR, bukan dibuang: 522 adalah origin yang
  * sedang tumbang di belakang Cloudflare, dan itu bisa pulih. Jalankan ulang
  * probe-nya untuk menyegarkan urutan ini.
+ *
+ * **`vidcore.io` turun ke bawah `vidlink` dan `cinesrc` karena 200-nya
+ * menipu.** Diamati langsung di peramban pada `vidcore.io/movie/27205`:
+ * halaman berhenti di "FETCHING YOUR CONTENT..." selama lebih dari 35 detik,
+ * `readyState` tetap 0, tanpa satu pun permintaan ke API sumbernya, dan satu
+ * ketukan tidak mengubah apa pun. Itulah persis batas yang disebut di bawah —
+ * kerangka pemutar yang tersaji bukan bukti ada yang bisa diputar.
  *
  * Catatan penting tentang angka di atas: probe dari sisi server hanya
  * membuktikan penyedia MENERIMA id itu dan menyajikan kerangka pemutar. Aliran
@@ -53,11 +62,34 @@ private class RuteEmbed(
 
 private val RUTE = listOf(
     RuteEmbed(
+        // DIUKUR di peramban, bukan diukur dari kode status saja: film
+        // `/embed/movie/27205` dan episode `/embed/tv/1396?s=1&e=1` sama-sama
+        // mencapai `readyState 4` dengan sumber `blob:` setelah satu ketukan.
+        //
+        // Ditemukan lewat watchvanta.xyz dan stcine.com, yang keduanya ternyata
+        // hanya KULIT: watchvanta menyemat `cinesrc.st/embed/movie/<tmdbId>`,
+        // dan stcine menyemat `apiplayer.ru/embed/movie/<tmdbId>`. Yang dipakai
+        // di sini pemutarnya langsung, bukan kulitnya, karena kulit itu aplikasi
+        // satu halaman: `stcine.com/player?id=27205&type=movie` dibuka dingin
+        // hanya memulangkan beranda kosong, dan `watchvanta.xyz/movie/<id>`
+        // butuh dua ketukan sebelum pemutarnya muncul.
+        //
+        // `apiplayer.ru` TIDAK dipasang: dibuka langsung ia menjawab
+        // "Verification Failed", jadi ia memeriksa siapa yang menyematnya.
+        // Memalsukan pemeriksaan itu berarti berpura-pura menjadi stcine.
+        "cinesrc",
+        { id -> "https://cinesrc.st/embed/movie/$id" },
+        { id, musim, episode -> "https://cinesrc.st/embed/tv/$id?s=$musim&e=$episode" },
+    ),
+    RuteEmbed(
         "vidlink",
         { id -> "https://vidlink.pro/movie/$id" },
         { id, musim, episode -> "https://vidlink.pro/tv/$id/$musim/$episode" },
     ),
     RuteEmbed(
+        // Tetap dipasang, tetapi SESUDAH yang terbukti berputar: 200-nya nyata,
+        // sumbernya tidak pernah datang. Kalau suatu saat pulih, ia tidak perlu
+        // dipasang ulang — hanya naik urutan.
         "vidcore",
         { id -> "https://vidcore.io/movie/$id" },
         { id, musim, episode -> "https://vidcore.io/tv/$id/$musim/$episode" },

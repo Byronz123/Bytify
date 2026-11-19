@@ -289,6 +289,8 @@ data class WatchTitleEntity(
     val genresJson: String,
     val rating: Double?,
     val runtimeMin: Int?,
+    /** Jumlah musim TMDB; hanya terisi untuk type "tv". */
+    val seasons: Int?,
     /**
      * Peta jenis langganan -> daftar id penyedia, misalnya
      * `{"flatrate":[8,159],"rent":[2]}`. Disimpan sebagai JSON karena jumlah
@@ -326,6 +328,8 @@ data class WatchAliasEntity(
     @PrimaryKey val movieId: String,
     val tmdbId: Int,
     val type: String,
+    /** Jumlah musim TMDB; hanya terisi untuk type "tv". */
+    val seasons: Int? = null,
 )
 
 /**

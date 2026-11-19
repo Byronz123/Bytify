@@ -271,6 +271,12 @@ def olah(tugas):
         "imdbId": (d.get("external_ids") or {}).get("imdb_id") or None,
         "status": d.get("status") or None,
         "language": d.get("original_language") or None,
+        # Jumlah musim TMDB. Datang GRATIS di jawaban yang sama, dan itulah
+        # satu-satunya yang kurang untuk membuka subtitle per-episode serial:
+        # seluruh 65.296 episode katalog kita bernomor musim 1, jadi acara
+        # BERMUSIM TUNGGAL aman diminta subtitlenya, sementara yang bermusim
+        # banyak tetap dilewati (3k).
+        "seasons": d.get("number_of_seasons") if jenis == "tv" else None,
     }
     w = ringkas_ketersediaan(d)
     if w:
@@ -300,8 +306,26 @@ def main():
               % (len(penyedia), len(hasil)))
         return 0
 
-    kerja = muat_daftar_kerja()
     hasil, penyedia = muat_hasil()
+
+    if "--segarkan-musim" in sys.argv:
+        # Judul TV yang dipanen SEBELUM `seasons` ada dibuang dari hasil supaya
+        # loop lanjutan di bawah memanennya ulang. Hanya TV, dan hanya yang
+        # belum punya angkanya: memanen ulang 68.916 film hanya untuk sebuah
+        # field yang memang tidak berlaku bagi film adalah pemborosan kuota.
+        #
+        # Daftar kerjanya diturunkan dari HASIL, bukan dari SUMBER_DAFTAR.
+        # Yang disegarkan adalah judul yang sudah pernah dipanen, jadi berkas
+        # daftar kerja aslinya tidak perlu ada lagi — dan memang sering tidak
+        # ada, karena ia berasal dari mesin yang memanennya pertama kali.
+        kerja = [(v["type"], v["tmdbId"]) for v in hasil.values()
+                 if v.get("type") == "tv" and not v.get("seasons")
+                 and isinstance(v.get("tmdbId"), int)]
+        for t, i in kerja:
+            hasil.pop("tmdb-" + t + "-" + str(i), None)
+        print("[watch] %d judul TV dipanen ulang untuk jumlah musim" % len(kerja))
+    else:
+        kerja = muat_daftar_kerja()
     if not penyedia:
         penyedia = dict((str(k), v) for k, v in daftar_penyedia().items())
         print("[watch] " + str(len(penyedia)) + " penyedia berlaku di " + WILAYAH)

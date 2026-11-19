@@ -48,6 +48,10 @@ WATCH = os.path.join(DIR_DATA, "watch_catalog.json")
 #: Harus SAMA dengan RUTE di app/.../data/movie/ServerTambahan.kt. Kalau salah
 #: satu berubah, yang lain ikut — kalau tidak, yang diukur bukan yang dipakai.
 PENYEDIA = {
+    "cinesrc": (
+        "https://cinesrc.st/embed/movie/{id}",
+        "https://cinesrc.st/embed/tv/{id}?s={musim}&e={episode}",
+    ),
     "vidsrc": (
         "https://vidsrc.cc/v2/embed/movie/{id}",
         "https://vidsrc.cc/v2/embed/tv/{id}/{musim}/{episode}",
@@ -71,6 +75,17 @@ PENYEDIA = {
 UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
 
+#: PERINGATAN tentang pola di bawah: `not found` dan `404` muncul juga di
+#: dalam bundel JavaScript kerangka aplikasi (pesan galat router Next.js),
+#: bukan hanya di halaman yang benar-benar tidak punya sumber. Terukur pada
+#: `cinesrc.st`, yang digolongkan "tanpa-sumber" untuk 40 dari 40 judul
+#: padahal di peramban ia mencapai `readyState 4` dengan sumber `blob:` —
+#: baik untuk film maupun episode.
+#:
+#: Jadi alat ini hanya sahih untuk penyedia yang menaruh penanda pemutarnya di
+#: HTML. Untuk pemutar yang merakit sumbernya sepenuhnya di JavaScript, hasil
+#: di sini TIDAK boleh dipakai menurunkan urutannya; yang menentukan
+#: pengamatan langsung di peramban atau di perangkat.
 TANPA_SUMBER = re.compile(
     r"no server could play|no sources? found|no stream found|video not found|"
     r"media not found|title not available|not found|404",

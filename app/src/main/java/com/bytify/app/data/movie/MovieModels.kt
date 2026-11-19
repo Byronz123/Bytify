@@ -275,6 +275,15 @@ data class AnimeServerDto(
      */
     val tmdbId: Int? = null,
     /**
+     * Ruang id TMDB yang dipakai [tmdbId]: "tv" (bawaan) atau "movie".
+     *
+     * Ruang id film dan serial TERPISAH di TMDB, jadi angka yang sama menunjuk
+     * dua judul berbeda. Anime berepisode tunggal dicocokkan ke /search/movie,
+     * dan tanpa penanda ini subtitlenya akan diminta untuk serial yang id-nya
+     * kebetulan sama.
+     */
+    val tmdbType: String? = null,
+    /**
      * Nomor musim TMDB judul ini, bila bisa ditentukan dengan yakin.
      *
      * Dipakai untuk SUBTITLE, bukan untuk pemutaran. Katalog menomori semua
@@ -319,6 +328,14 @@ data class WatchCatalogDto(
 data class WatchAliasDto(
     val tmdbId: Int = 0,
     val type: String = "movie",
+    /**
+     * Jumlah musim TMDB; hanya untuk "tv".
+     *
+     * Ada DI SINI, bukan hanya di daftar judul, karena daftar judul hanya
+     * memuat yang punya layanan sah di Indonesia — sementara subtitle tidak
+     * ada hubungannya dengan ketersediaan.
+     */
+    val seasons: Int? = null,
 )
 
 @Serializable
@@ -341,6 +358,15 @@ data class WatchTitleDto(
     val genres: List<String> = emptyList(),
     val rating: Double? = null,
     val runtimeMin: Int? = null,
+    /**
+     * Jumlah musim menurut TMDB; hanya untuk "tv".
+     *
+     * Inilah yang membuka subtitle per-episode serial. Seluruh episode katalog
+     * kita bernomor musim 1 karena situs sumbernya meratakan penomoran, jadi
+     * acara BERMUSIM TUNGGAL bisa diminta subtitlenya dengan benar, sementara
+     * yang bermusim banyak tetap dilewati (3k).
+     */
+    val seasons: Int? = null,
     /** jenis langganan -> daftar id penyedia, mis. {"flatrate":[8,159]}. */
     val watch: Map<String, List<Int>> = emptyMap(),
     /** Tautan resmi halaman tonton; dibuka DI LUAR aplikasi. */

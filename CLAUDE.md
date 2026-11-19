@@ -598,6 +598,141 @@ video) melaporkan DIAM, dan server yang sudah dapat sumber ikut dibuang.
 Karena itu DIAM diabaikan setelah SIAP — bukti positif mengalahkan ketiadaan
 bukti. Penandanya ada di Kotlin (`sudahSiap`), bukan di dalam skrip.
 
+### 3n-bis. Pemutar pihak ketiga MENUNGGU GESTUR, dan dua situs baru ternyata kulit
+
+**Ketukan otomatis dulu dimatikan di jalur langsung, dan itu salah.** Alasannya
+masuk akal: `mediaPlaybackRequiresUserGesture` sudah dimatikan, jadi pemutar
+pihak ketiga "berjalan sendiri". Diamati di peramban, dugaan itu runtuh --
+`vidlink.pro/movie/27205` diam di `readyState 0` TANPA `currentSrc` sama
+sekali; satu ketukan sungguhan, dan ia membuat `blob:` lalu mencapai
+`readyState 4`. Sumbernya memang baru dibuat setelah ada gestur.
+
+Yang berbahaya bukan ketukannya, melainkan mengetuk pemutar yang SUDAH
+berjalan -- itulah yang dulu membuka menu subtitle anikai menutupi video. Jadi
+ketukan dipasang di kedua jalur dengan rem `sudahSiap`, dan jeda awal jalur
+langsung dibuat 6 detik supaya server yang tidak butuh ketukan (anikai mencapai
+SIAP di detik ke-3) sudah menarik remnya lebih dulu.
+
+**watchvanta.xyz dan stcine.com adalah KULIT, bukan server.** Ditelusuri
+langsung:
+
+| situs | yang sebenarnya diputar |
+|---|---|
+| `watchvanta.xyz/movie/<tmdbId>` | iframe `cinesrc.st/embed/movie/<tmdbId>` |
+| `stcine.com/player?id=<tmdbId>&type=movie` | iframe `apiplayer.ru/embed/movie/<tmdbId>` |
+
+Keduanya aplikasi satu halaman, dan itu yang memutuskan: `stcine.com/player?...`
+dibuka DINGIN hanya memulangkan beranda kosong (ia butuh navigasi di dalam
+aplikasinya lebih dulu), sementara `watchvanta.xyz/movie/<id>` butuh dua
+ketukan sebelum pemutarnya muncul. Jadi yang dipasang pemutarnya langsung.
+
+`cinesrc.st` DIPASANG dan terbukti berputar: film `/embed/movie/27205` dan
+episode `/embed/tv/1396?s=1&e=1` sama-sama mencapai `readyState 4` dengan
+sumber `blob:` setelah satu ketukan. `apiplayer.ru` TIDAK dipasang: dibuka
+langsung ia menjawab "Verification Failed", jadi ia memeriksa siapa yang
+menyematnya, dan melewati pemeriksaan itu berarti berpura-pura menjadi stcine.
+
+`watchvanta.xyz/movie/27205` mengalihkan diri ke `/movie/tt1375666`, dan
+`stcine.com/movie/<slug>-<tahun>-<tmdbId>` mengabaikan slug dan tahunnya
+(`/movie/x-0-27205` memulangkan Inception). Keduanya menerima TMDB id, jadi
+tidak ada berkas katalog baru yang dibutuhkan -- konsisten dengan 3n.
+
+**`vidcore.io` turun urutan: 200-nya menipu.** Halaman berhenti di
+"FETCHING YOUR CONTENT..." lebih dari 35 detik, `readyState` tetap 0, tanpa
+satu pun permintaan ke API sumbernya, dan ketukan tidak mengubah apa pun.
+`vidsrc.cc` masih 522. Inilah contoh persis dari batas yang sudah tercatat:
+kerangka pemutar yang tersaji BUKAN bukti ada yang bisa diputar.
+
+**`probe_servers.py` punya salah-negatif yang harus diketahui.** Polanya
+mencari penanda pemutar di HTML, sementara `cinesrc.st` merakit sumbernya
+sepenuhnya di JavaScript -- dan string `not found` di dalam bundel router
+Next.js membuatnya tergolong "tanpa-sumber" untuk 40 dari 40 judul, padahal
+ia berputar. Untuk pemutar seperti itu, urutan DITENTUKAN oleh pengamatan di
+peramban atau di perangkat, bukan oleh alat ini.
+
+### 3r. Subtitle: celah yang ditutup, dan di mana angkanya disimpan
+
+Tiga lubang berbeda, semuanya bermuara pada "tidak punya TMDB id yang benar".
+
+**Anime tanpa padanan AniList.** Jembatan AniList hanya menjangkau 5.723 dari
+8.007 judul anikai. `tmdb_match.py` karena itu dapat mode ketiga, `--anime`,
+dengan aturan KETAT yang sama (3h) -- judul ternormalkan sama persis, tahun +-1,
+yang menunjuk lebih dari satu DILEWATI. Sumbernya `anikai_database.json`, bukan
+katalog terbit, karena hanya di sana ada `altTitle` (romaji dari JSON-LD).
+
+**Anime berepisode tunggal adalah FILM.** 815 judul seperti itu tidak akan
+pernah tercocokkan di `/search/tv`. Mode `--anime-film` mencocokkannya ke
+`/search/movie`. Ruang id TMDB film dan serial TERPISAH, jadi tipenya ikut
+diterbitkan sebagai `tmdbType`; tanpa itu aplikasi akan meminta subtitle untuk
+serial yang id-nya kebetulan sama.
+
+Hasilnya: TMDB id 5.723 -> **6.733**, nomor musim 3.314 -> **4.133**, ditambah
+326 yang dikenali sebagai film.
+
+**Nomor musim dihitung ulang atas himpunan yang BENAR-BENAR terbit.**
+`peta_musim` mengelompokkan lewat alias AniList, sehingga satu saudara DI LUAR
+katalog yang nomornya bertabrakan membuang musim untuk saudara yang ada di
+dalamnya. Aturannya tetap konservatif (3j): nomor dipakai hanya bila seluruh
+anggota grup berbeda-beda; satu tabrakan, seluruh grup kehilangan musimnya.
+
+**Serial bermusim tunggal kini DAPAT subtitle per-episode.** Yang kurang dari
+3k hanyalah jumlah musim TMDB, dan angka itu datang GRATIS di jawaban yang
+sudah diambil `tmdb_watch.py` (`number_of_seasons`). Acara bermusim tunggal
+tidak punya musim lain untuk tertukar, jadi "musim 1 episode N" pasti benar.
+Hasilnya 3.202 dari 4.155 serial (77%) terbuka; sisanya tetap dilewati.
+
+**Angkanya disimpan di ALIAS, bukan hanya di daftar judul.** `watch_titles`
+hanya memuat judul yang punya layanan sah di Indonesia (15.357 dari 79.707),
+jadi menaruh `seasons` hanya di sana berarti 953 serial tanpa layanan tidak
+akan pernah dapat subtitle -- padahal subtitle tidak ada hubungannya dengan
+ketersediaan. `MIGRATION_12_13` menambah kolom `seasons` ke `watch_titles` DAN
+`watch_aliases`. Null diperlakukan TIDAK AMAN: belum tersinkron bukan berarti
+bermusim tunggal.
+
+### 3s. Status kanal Live TV kini hasil pengukuran
+
+`isAvailable` dulu konstanta `true`, jadi status yang tampil hanya menandakan
+kesegaran data. `probe_live.py` memeriksa tiap alamat dan menulis `alive`,
+`probeStatus`, serta `checkedAtEpochMs` kembali ke `live_tv_database.json`;
+`toLiveChannel` membacanya saat terbit. Tidak ada berkas baru dan tidak ada
+tabel Room baru.
+
+Hasil sapuan pertama: **6.363 dari 8.755 kanal hidup (72,7%)**. Sebab terbanyak
+yang mati: `http 403` 628, `http 404` 522, timeout 279, DNS gagal 270,
+sertifikat ditolak 264.
+
+Tiga hal yang mengikat bentuknya:
+
+- **GET, bukan HEAD.** Banyak origin HLS menjawab 405/403 untuk HEAD padahal
+  GET-nya normal, jadi HEAD akan menandai kanal sehat sebagai mati.
+- **Sepotong badan ikut dibaca** (`Range: bytes=0-2047`), karena banyak CDN
+  memulangkan 200 untuk halaman galat atau "domain for sale". `#EXTM3U` di awal
+  badan memisahkan playlist sungguhan dari 200 yang kosong isinya.
+- **Kanal yang BELUM diperiksa tetap dianggap tersedia.** Ketiadaan pengukuran
+  bukan bukti mati, dan memadamkan seluruh katalog setiap kali prober belum
+  jalan jauh lebih buruk daripada status yang belum diperbarui. Dijaga uji
+  kontrak di `build-pages.test.mjs`.
+
+Kanal mati TIDAK dibuang dari katalog, hanya ditandai: 403 sering berarti
+pembatasan wilayah, dan itu bisa berbeda di jaringan penonton.
+
+### 3t. Podcast lintas negara
+
+Podcast dulu terkunci di storefront `id`, padahal endpoint Apple-nya sama
+persis dan hanya kode negaranya yang berganti. Layar Jelajah kini punya deret
+chip 31 storefront, sejajar dengan Radio.
+
+Daftarnya TETAP di `PodcastRepository.negaraPodcast`, bukan hasil panen: Apple
+tidak menerbitkan daftar storefront lewat RSS -- yang ada hanya endpoint per
+negara yang menjawab 404 kalau kodenya tidak dikenal. Radio memakai daftar
+negara dari radio-browser karena sumbernya memang menyediakannya; podcast tidak
+punya padanannya, jadi bentuknya berbeda dan itu disengaja.
+
+Jebakan saat memeriksanya: memanggil 30 storefront beruntun membuat Apple
+menjatuhkan koneksi, dan hasilnya terbaca seolah storefrontnya tidak ada.
+Dengan jeda dan percobaan ulang, semuanya menjawab. Jangan menyimpulkan sebuah
+storefront mati dari satu kegagalan.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar
@@ -1090,6 +1225,9 @@ kalau ingin angka yang sahih.
 - [ ] Tugas terjadwal bawaannya TIDAK berjalan saat laptop memakai baterai
       (`DisallowStartIfOnBatteries=True`). Kalau daemon tampak tidak pernah
       jalan, periksa itu dulu sebelum mencurigai skripnya.
+      Mengubahnya WAJIB dari PowerShell Administrator -- tanpa elevasi
+      `Set-ScheduledTask` menjawab "Access is denied", sama seperti pembuatan
+      tugasnya.
 - [x] TERBUKTI di Galaxy A36 (SM-A366B, Android 17): film Inception BERPUTAR —
       `BYTIFY_MAIN` muncul 5 detik setelah tombol ditekan, status "Server 1 dari
       6 berjalan", chip server katalog + turunan tampil berdampingan, subtitle
@@ -1110,6 +1248,6 @@ kalau ingin angka yang sahih.
       51.015 dan sections 7 utuh, nol FATAL EXCEPTION. Chip terjangkau oleh
       7.172 film LK21 dan 1.018 film Indonesia — diukur dengan JOIN di
       database perangkat, bukan di PC.
-- [ ] Podcast masih Indonesia saja; radio sudah lintas negara
-- [ ] Status kanal Live TV belum memverifikasi stream hidup/mati
+- [x] Podcast lintas negara (31 storefront Apple); lihat 3t
+- [x] Status kanal Live TV diukur `probe_live.py`: 6.363/8.755 hidup; lihat 3s
 - [ ] Animasi navigasi belum dibandingkan bingkai-per-bingkai dengan video acuan

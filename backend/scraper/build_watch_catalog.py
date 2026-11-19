@@ -100,18 +100,25 @@ def ramping(t, dikenal=None):
     }
     if w.get("link"):
         hasil["watchLink"] = w["link"]
-    for opsional in ("rating", "runtimeMin", "imdbId", "language", "originalTitle"):
+    for opsional in ("rating", "runtimeMin", "imdbId", "language", "originalTitle",
+                     "seasons"):
         if t.get(opsional):
             hasil[opsional] = t[opsional]
     return {k: v for k, v in hasil.items() if v not in (None, [], {})}
 
 
-def muat_alias():
+def muat_alias(musim_tmdb=None):
     """
     Alias dipakai DUA lapisan: ketersediaan resmi dan subtitle. Karena itu
     SELURUH hasil cocok diterbitkan, bukan hanya yang punya ketersediaan —
     sebuah judul bisa tidak ada di layanan sah mana pun tapi tetap punya
     subtitle, dan sebaliknya.
+
+    Jumlah musim ikut DI SINI, bukan hanya di `titles`, justru karena alasan
+    yang sama. `titles` hanya memuat judul yang punya layanan sah di Indonesia
+    (15.357 dari 79.707), jadi menaruh `seasons` hanya di sana berarti serial
+    yang tidak ada di layanan mana pun tidak akan pernah dapat subtitle —
+    padahal subtitle tidak ada hubungannya dengan ketersediaan.
     """
     keluar = {}
     for jalur in SUMBER_ALIAS:
@@ -130,7 +137,16 @@ def muat_alias():
                 # salah — yang pertama dipertahankan dan bentrokannya dihitung.
                 if idFilm in keluar and keluar[idFilm]["tmdbId"] != tid:
                     continue
-                keluar[idFilm] = {"tmdbId": tid, "type": jenis}
+                baris = {"tmdbId": tid, "type": jenis}
+                # Hanya untuk serial, dan hanya kalau angkanya ada: inilah yang
+                # membuka subtitle per-episode untuk acara BERMUSIM TUNGGAL
+                # (3k). Acara bermusim banyak tetap dilewati, karena seluruh
+                # episode katalog kita bernomor musim 1.
+                if jenis == "tv" and musim_tmdb:
+                    n = musim_tmdb.get(tid)
+                    if isinstance(n, int) and n > 0:
+                        baris["seasons"] = n
+                keluar[idFilm] = baris
     return keluar
 
 
@@ -166,7 +182,13 @@ def main():
                 dipakai.add(str(pid))
     penyedia = {k: v for k, v in penyedia_semua.items() if k in dipakai}
 
-    alias = muat_alias()
+    # Jumlah musim diambil dari HASIL PANEN MENTAH, bukan dari judul yang
+    # lolos terbit: alias menjangkau judul tanpa ketersediaan juga.
+    musim_tmdb = {}
+    for satu in judul:
+        if satu.get("type") == "tv" and isinstance(satu.get("seasons"), int):
+            musim_tmdb[satu.get("tmdbId")] = satu["seasons"]
+    alias = muat_alias(musim_tmdb)
 
     sementara = KELUARAN + ".tmp"
     with open(sementara, "w", encoding="utf-8") as f:

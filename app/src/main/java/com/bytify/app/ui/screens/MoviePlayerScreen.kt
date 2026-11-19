@@ -255,10 +255,33 @@ private fun ketukTengah(web: WebView) {
     naik.recycle()
 }
 
-private fun ketukOtomatis(web: WebView, sudahMain: AtomicBoolean, percobaan: Int = 0) {
-    if (percobaan >= 8 || sudahMain.get()) return
+/**
+ * Mengetuk tengah halaman sampai filmnya berjalan.
+ *
+ * [sudahSiap] adalah REM-nya, dan tanpa rem itu ketukan merusak server yang
+ * sehat: terlihat di Galaxy A36, menu subtitle anikai terbuka menutupi video
+ * yang sedang berputar. Begitu ada frame yang melaporkan sumbernya menempel,
+ * ketukan berhenti.
+ *
+ * [jedaAwal] dibedakan karena dua jalur punya kebutuhan berlawanan. Halaman
+ * bergerbang iklan (LK21) harus diketuk cepat. Pemutar pihak ketiga yang
+ * dimuat LANGSUNG hanya perlu diketuk kalau ia memang menunggu gestur —
+ * terukur di peramban: `vidlink.pro/movie/27205` diam di `readyState 0` tanpa
+ * `currentSrc`, dan baru setelah satu ketukan sungguhan ia membuat
+ * `blob:` dan mencapai `readyState 4`. Jedanya dibuat lebih panjang supaya
+ * server yang TIDAK butuh ketukan (anikai mencapai SIAP di detik ke-3) sudah
+ * menarik remnya sebelum ketukan pertama datang.
+ */
+private fun ketukOtomatis(
+    web: WebView,
+    sudahMain: AtomicBoolean,
+    percobaan: Int = 0,
+    sudahSiap: AtomicBoolean? = null,
+    jedaAwal: Long = 2500L,
+) {
+    if (percobaan >= 8 || sudahMain.get() || sudahSiap?.get() == true) return
     web.postDelayed({
-        if (!sudahMain.get() && web.width > 0 && web.height > 0) {
+        if (!sudahMain.get() && sudahSiap?.get() != true && web.width > 0 && web.height > 0) {
             val x = web.width / 2f
             val y = web.height / 2f
             val saat = SystemClock.uptimeMillis()
@@ -270,9 +293,9 @@ private fun ketukOtomatis(web: WebView, sudahMain: AtomicBoolean, percobaan: Int
             }
             turun.recycle()
             naik.recycle()
-            ketukOtomatis(web, sudahMain, percobaan + 1)
+            ketukOtomatis(web, sudahMain, percobaan + 1, sudahSiap, jedaAwal)
         }
-    }, if (percobaan == 0) 2500L else 3000L)
+    }, if (percobaan == 0) jedaAwal else 3000L)
 }
 
 internal const val EMBED_USER_AGENT =
@@ -722,6 +745,23 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
             val entri = runCatching { repository.serverAnime() }.getOrNull()
                 ?.titles?.get(idAnikai.toString())
             val tmdbAnime = entri?.tmdbId ?: return@LaunchedEffect
+            // Anime berepisode tunggal adalah FILM, dan film tidak punya
+            // musim. Memintanya sebagai "episode" memulangkan daftar kosong,
+            // jadi 326 judul seperti itu tidak akan pernah dapat subtitle
+            // kalau tipenya tidak dibedakan.
+            if (entri.tmdbType == "movie") {
+                subtitlesJaring = app.container.movieCatalogApi.fetchSubtitles(
+                    tmdbId = tmdbAnime,
+                    type = "movie",
+                )
+                Log.i(
+                    EMBED_TAG,
+                    "subtitle anime (film): tmdb=$tmdbAnime " +
+                        "hasil=${subtitlesJaring.size} " +
+                        "bahasa=${subtitlesJaring.map { it.lang }}",
+                )
+                return@LaunchedEffect
+            }
             // Tanpa nomor musim yang pasti, permintaan per-episode akan
             // memulangkan subtitle MUSIM YANG SALAH. Lebih baik tidak ada
             // subtitle daripada subtitle musim lain.
@@ -1710,14 +1750,20 @@ private fun EmbedVideoStage(
                             // menjalankannya di sana merusak pemutar yang
                             // sebetulnya sehat.
                             if (!langsung) view?.evaluateJavascript(EMBED_CLEANUP_JS, null)
-                            // Ketukan otomatis juga hanya untuk halaman
-                            // bergerbang iklan. Pemutar pihak ketiga berjalan
-                            // sendiri (mediaPlaybackRequiresUserGesture sudah
-                            // dimatikan), jadi ketukan di sana tidak memulai
-                            // apa pun — ia justru MEMBUKA menu pemutarnya.
-                            // Terlihat di A36: menu subtitle anikai terbuka
-                            // menutupi video yang sedang berjalan.
-                            if (!langsung) view?.let { ketukOtomatis(it, sudahMain) }
+                            // Ketukan otomatis berlaku di KEDUA jalur, tetapi
+                            // dengan jeda berbeda. Dugaan lama bahwa pemutar
+                            // pihak ketiga selalu berjalan sendiri SALAH:
+                            // vidlink menunggu gestur sungguhan sebelum membuat
+                            // sumbernya sama sekali. Yang benar-benar berbahaya
+                            // bukan ketukannya, melainkan mengetuk pemutar yang
+                            // sudah berjalan — dan itu dicegah oleh [sudahSiap].
+                            view?.let {
+                                if (langsung) {
+                                    ketukOtomatis(it, sudahMain, 0, sudahSiap, 6000L)
+                                } else {
+                                    ketukOtomatis(it, sudahMain, 0, sudahSiap)
+                                }
+                            }
                         }
 
                         override fun onReceivedError(

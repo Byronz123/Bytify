@@ -48,6 +48,9 @@ JUDUL_ANILIST = os.path.join(DIR_DATA, "anime_titles.json")
 BASIS_ANIME = os.path.join(DIR_DATA, "anime_database.json")
 KELUARAN = os.path.join(DIR_DATA, "anime_servers.json")
 
+MATCH_ANIME = os.path.join(DIR_DATA, "anime_match.json")
+MATCH_ANIME_FILM = os.path.join(DIR_DATA, "anime_movie_match.json")
+
 BATAS_AMAN_MIB = 24
 WATCH = os.path.join(DIR_DATA, "watch_catalog.json")
 
@@ -256,7 +259,36 @@ def main():
                     if sisa.isdigit():
                         tmdb_anilist[int(sisa)] = int(v["tmdbId"])
 
+    # Sumber KEDUA untuk TMDB id: pencocokan judul KETAT langsung ke TMDB
+    # (`tmdb_match.py --anime`). Jembatan AniList hanya menjangkau 5.723 dari
+    # 8.007 judul; sisanya tidak punya TMDB id sama sekali, dan tanpa TMDB id
+    # tidak ada subtitle. Aturannya sama ketatnya dengan 3h — judul ternormalkan
+    # sama persis, tahun ±1, yang menunjuk lebih dari satu DILEWATI.
+    #
+    # Urutannya: AniList dulu, pencocokan judul sebagai pengisi kekosongan.
+    # Jembatan AniList sudah diverifikasi ulang terhadap judul TMDB (98,1%,
+    # 3i), jadi ia bukti yang lebih kuat daripada kecocokan judul tunggal.
+    cocok_judul = {}
+    if os.path.exists(MATCH_ANIME):
+        with open(MATCH_ANIME, encoding="utf-8") as f:
+            for kunci, nilai in ((json.load(f).get("matches") or {})).items():
+                if kunci.startswith("anikai-") and nilai.get("tmdbId"):
+                    cocok_judul[kunci.removeprefix("anikai-")] = int(nilai["tmdbId"])
+
+    # Anime BEREPISODE TUNGGAL adalah film, dan film tidak ada di /search/tv.
+    # 815 judul seperti itu tidak pernah dapat TMDB id lewat jalur mana pun,
+    # jadi dicocokkan terpisah ke /search/movie. Ruang id TMDB untuk film dan
+    # serial TERPISAH, jadi tipenya ikut diterbitkan — tanpa itu aplikasi akan
+    # meminta subtitle untuk serial yang id-nya kebetulan sama.
+    cocok_film = {}
+    if os.path.exists(MATCH_ANIME_FILM):
+        with open(MATCH_ANIME_FILM, encoding="utf-8") as f:
+            for kunci, nilai in ((json.load(f).get("matches") or {})).items():
+                if kunci.startswith("anikai-") and nilai.get("tmdbId"):
+                    cocok_film[kunci.removeprefix("anikai-")] = int(nilai["tmdbId"])
+
     titles = {}
+    judul_anikai = {}
     cocok = ambigu = tanpa_sumber = tak_ketemu = luar_katalog = 0
     for satu in anikai:
         if satu.get("server") == 0 or not satu.get("seal"):
@@ -326,15 +358,53 @@ def main():
         # Nomor musim TMDB ikut, kalau bisa ditentukan dengan yakin. Inilah
         # yang membuka subtitle per-episode untuk anime yang selama ini
         # dilewati penjaga 3j.
-        if aid is not None:
-            t = tmdb_anilist.get(aid)
-            if t:
-                entri["tmdbId"] = t
-                m = musim.get(aid)
-                if m:
-                    entri["season"] = m
+        t = tmdb_anilist.get(aid) if aid is not None else None
+        if not t:
+            t = cocok_judul.get(kunci)
+        film_tmdb = None
+        if not t:
+            film_tmdb = cocok_film.get(kunci)
+            t = film_tmdb
+        if t:
+            entri["tmdbId"] = t
+            if film_tmdb:
+                # Hanya ditulis untuk film. Bawaannya "tv", karena itu yang
+                # berlaku bagi hampir seluruh katalog, dan menuliskannya di
+                # 6.407 entri hanya menggelembungkan berkas tanpa menambah
+                # keterangan apa pun.
+                entri["tmdbType"] = "movie"
+            m = musim.get(aid) if aid is not None else None
+            if m:
+                entri["season"] = m
+        judul_anikai[kunci] = satu.get("title") or satu.get("altTitle") or ""
         titles[kunci] = entri
         cocok += 1
+
+    # Nomor musim dihitung ulang atas himpunan yang BENAR-BENAR terbit.
+    #
+    # `peta_musim` di atas mengelompokkan lewat alias AniList, jadi sebuah grup
+    # bisa berisi musim yang tidak ada di katalog kita — dan satu saudara di
+    # luar katalog yang nomornya bertabrakan membuang musim untuk saudara yang
+    # ada di dalamnya. Yang menentukan seharusnya apa yang kita terbitkan.
+    #
+    # Aturannya tetap sama dan tetap konservatif (3j): bila seluruh entri yang
+    # berbagi satu TMDB id menghasilkan nomor musim yang BERBEDA-BEDA, nomornya
+    # dipakai; satu tabrakan saja dan SELURUH grup itu kehilangan musimnya.
+    # Subtitle musim yang salah lebih buruk daripada tidak ada subtitle.
+    grup_terbit = defaultdict(list)
+    for kunci, entri in titles.items():
+        if entri.get("tmdbId") and entri.get("tmdbType") != "movie":
+            grup_terbit[entri["tmdbId"]].append(kunci)
+    musim_terbit = 0
+    for anggota in grup_terbit.values():
+        nomor = {k: musim_dari_judul(judul_anikai.get(k, "")) for k in anggota}
+        if len(set(nomor.values())) != len(anggota):
+            for k in anggota:
+                titles[k].pop("season", None)
+            continue
+        for k, n in nomor.items():
+            titles[k]["season"] = n
+            musim_terbit += 1
 
     keluar = {
         "player": "https://play.anikai.org",
@@ -352,6 +422,11 @@ def main():
 
     mib = os.path.getsize(KELUARAN) / 1024 / 1024
     print(f"{cocok} anime dapat server anikai, {mib:.2f} MiB -> {KELUARAN}")
+    punya_tmdb = sum(1 for v in titles.values() if v.get("tmdbId"))
+    punya_musim = sum(1 for v in titles.values() if v.get("season"))
+    punya_film = sum(1 for v in titles.values() if v.get("tmdbType") == "movie")
+    print(f"  {punya_tmdb} punya TMDB id, {punya_musim} punya nomor musim "
+          f"(subtitle per-episode), {punya_film} dikenali sebagai film")
     print(f"  dilewati: {ambigu} ambigu, {tak_ketemu} judul tak ditemukan, "
           f"{luar_katalog} di luar katalog, {tanpa_sumber} tanpa sumber")
     if mib > BATAS_AMAN_MIB:

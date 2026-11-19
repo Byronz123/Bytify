@@ -97,9 +97,20 @@ export function toLiveChannel(item, checkedAtEpochMs) {
         language: String(item.language ?? ''),
         streamUrl: parsedUrl.toString(),
         streamType: /\.mp4(?:$|[?#])/i.test(parsedUrl.href) ? 'mp4' : 'hls',
-        isAvailable: true,
-        statusMessage: null,
-        checkedAtEpochMs,
+        // Status kini HASIL PENGUKURAN, bukan konstanta.
+        //
+        // `probe_live.py` memeriksa tiap alamat dan menulis `alive` kembali ke
+        // live_tv_database.json. Kanal yang BELUM pernah diperiksa (`alive`
+        // tidak ada) tetap dianggap tersedia: ketiadaan pengukuran bukan bukti
+        // mati, dan menandai seluruh katalog mati hanya karena prober belum
+        // jalan jauh lebih buruk daripada status yang belum diperbarui.
+        isAvailable: item.alive !== false,
+        statusMessage: item.alive === false
+            ? `Stream tidak menjawab (${item.probeStatus ?? 'tidak diketahui'})`
+            : null,
+        checkedAtEpochMs: Number.isFinite(item.checkedAtEpochMs)
+            ? item.checkedAtEpochMs
+            : checkedAtEpochMs,
         license: item.license ?? null,
     };
 }

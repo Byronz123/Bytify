@@ -226,8 +226,20 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
                 // membuat subtitle film lain tampil. Kunci objek JSON sudah unik,
                 // jadi yang perlu dijaga adalah tidak ada nilai yang cacat.
                 assert.ok(
-                    kunciAlias.every((k) => Object.keys(alias[k]).length === 2),
-                    'alias hanya boleh membawa tmdbId dan type',
+                    kunciAlias.every((k) => Object.keys(alias[k])
+                        .every((f) => ['tmdbId', 'type', 'seasons'].includes(f))),
+                    'alias hanya boleh membawa tmdbId, type, dan seasons',
+                );
+                // `seasons` membuka subtitle per-episode untuk serial bermusim
+                // tunggal (3k). Angka yang cacat akan membuka judul yang
+                // seharusnya tetap tertutup, jadi bentuknya dijaga di sini.
+                assert.ok(
+                    kunciAlias.every((k) => {
+                        const n = alias[k].seasons;
+                        if (n === undefined) return true;
+                        return Number.isInteger(n) && n > 0 && alias[k].type === 'tv';
+                    }),
+                    'seasons harus bulat positif dan hanya untuk type tv',
                 );
             }
 
@@ -276,7 +288,7 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
                 // BENAR untuk anime (lihat 3p).
                 for (const kunci of Object.keys(nilai)) {
                     assert.ok(
-                        ['seal', 'server', 'season', 'eps', 'tmdbId'].includes(kunci),
+                        ['seal', 'server', 'season', 'eps', 'tmdbId', 'tmdbType'].includes(kunci),
                         `entri ${idAnilist} membawa kunci tak dikenal: ${kunci}`,
                     );
                 }
@@ -302,4 +314,31 @@ test('build-pages deploys backend/data/catalog.json as the single source of trut
     } finally {
         fs.rmSync(outDir, { recursive: true, force: true });
     }
+});
+
+// Status kanal Live TV adalah HASIL PENGUKURAN `probe_live.py`, bukan
+// konstanta. Uji ini menjaga ketiga keadaannya sekaligus, karena yang paling
+// berbahaya bukan kanal mati yang tertandai, melainkan kanal yang BELUM
+// diperiksa ikut tertandai mati — itu akan memadamkan seluruh katalog setiap
+// kali prober belum sempat jalan.
+test('status kanal Live TV mengikuti hasil pemeriksaan stream', async () => {
+    const { toLiveChannel } = await import('../server.mjs');
+    const dasar = { id: 'a', name: 'A', stream_url: 'https://cdn.example/a.m3u8' };
+
+    const belum = toLiveChannel({ ...dasar }, 111);
+    assert.equal(belum.isAvailable, true, 'belum diperiksa tetap tersedia');
+    assert.equal(belum.statusMessage, null);
+    assert.equal(belum.checkedAtEpochMs, 111);
+
+    const hidup = toLiveChannel(
+        { ...dasar, alive: true, probeStatus: 'hls', checkedAtEpochMs: 222 }, 111);
+    assert.equal(hidup.isAvailable, true);
+    assert.equal(hidup.statusMessage, null);
+    assert.equal(hidup.checkedAtEpochMs, 222, 'memakai stempel waktu pemeriksaan');
+
+    const mati = toLiveChannel(
+        { ...dasar, alive: false, probeStatus: 'http 404', checkedAtEpochMs: 333 }, 111);
+    assert.equal(mati.isAvailable, false);
+    assert.match(mati.statusMessage, /http 404/);
+    assert.equal(mati.checkedAtEpochMs, 333);
 });

@@ -94,6 +94,7 @@ class WatchRepository(
                     genresJson = json.encodeToString(dto.genres),
                     rating = dto.rating,
                     runtimeMin = dto.runtimeMin,
+                    seasons = dto.seasons,
                     watchJson = json.encodeToString(dto.watch),
                     watchLink = dto.watchLink,
                     updatedAt = now,
@@ -111,6 +112,7 @@ class WatchRepository(
                 movieId = idFilm,
                 tmdbId = acuan.tmdbId,
                 type = if (acuan.type == "tv") "tv" else "movie",
+                seasons = acuan.seasons,
             )
         }
         alias.chunked(POTONG).forEach { dao.upsertWatchAliases(it) }
@@ -231,11 +233,24 @@ class WatchRepository(
             // Serial lk21/nontondrama: SELURUH 65.296 episodenya bernomor
             // musim 1, karena situs sumbernya meratakan penomoran. Untuk acara
             // yang di TMDB punya beberapa musim, "musim 1 episode 30" akan
-            // memulangkan subtitle musim yang salah, dan kita belum punya data
-            // jumlah musim TMDB untuk memilahnya. Jadi subtitle per-episode
-            // untuk serial DITUNDA sampai itu terjawab — chip ketersediaannya
-            // tetap tampil, karena itu per-acara dan tidak bergantung musim.
-            if (idFilm.startsWith("series-")) return@withContext false
+            // memulangkan subtitle musim yang SALAH.
+            //
+            // Yang kurang dulu hanyalah jumlah musim TMDB, dan sekarang angka
+            // itu ikut di lapisan ketersediaan (`seasons`). Jadi penjaganya
+            // tidak lagi menolak semua serial, melainkan hanya yang bermusim
+            // banyak. Acara bermusim TUNGGAL tidak punya musim lain untuk
+            // tertukar, jadi "musim 1 episode N" pasti episode yang benar.
+            //
+            // Null diperlakukan sebagai TIDAK AMAN: belum tersinkron bukan
+            // berarti bermusim tunggal, dan subtitle musim yang salah lebih
+            // buruk daripada tidak ada subtitle (3h).
+            if (idFilm.startsWith("series-")) {
+                // Dibaca dari ALIAS, bukan dari daftar judul: daftar judul
+                // hanya memuat yang punya layanan sah di Indonesia, jadi 953
+                // dari 4.155 serial tidak akan pernah punya barisnya di sana.
+                val musim = runCatching { dao.watchAlias(idFilm)?.seasons }.getOrNull()
+                return@withContext musim == 1
+            }
 
             // Anime: beberapa entri AniList (musim) menunjuk satu entri TMDB.
             val jumlah = runCatching { dao.jumlahAliasUntukTmdb(tmdbId, tipe) }.getOrDefault(0)

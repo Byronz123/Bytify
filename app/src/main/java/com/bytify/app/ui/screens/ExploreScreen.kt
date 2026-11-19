@@ -216,20 +216,24 @@ private fun PodcastHome() {
     val subscriptions by repo.subscriptions.collectAsState(initial = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var attempt by remember { mutableIntStateOf(0) }
+    // Storefront yang sedang dilihat. Radio sudah lintas negara sejak lama;
+    // podcast dulu terkunci di "id", padahal endpoint Apple-nya sama persis
+    // dan hanya kode negaranya yang berganti.
+    var negara by rememberSaveable { mutableStateOf("id") }
     var top by remember { mutableStateOf<Load<List<Podcast>>>(Load.Loading) }
     var results by remember { mutableStateOf<Load<List<Podcast>>?>(null) }
     var latest by remember { mutableStateOf<List<Episode>>(emptyList()) }
 
-    LaunchedEffect(attempt) {
+    LaunchedEffect(attempt, negara) {
         top = Load.Loading
-        top = runCatching { repo.top() }.fold({ Load.Ready(it) }, { Load.Failed })
+        top = runCatching { repo.top(negara) }.fold({ Load.Ready(it) }, { Load.Failed })
     }
-    LaunchedEffect(query, attempt) {
+    LaunchedEffect(query, attempt, negara) {
         val q = query.trim()
         if (q.isEmpty()) { results = null; return@LaunchedEffect }
         delay(450)
         results = Load.Loading
-        results = runCatching { repo.search(q) }.fold({ Load.Ready(it) }, { Load.Failed })
+        results = runCatching { repo.search(q, negara) }.fold({ Load.Ready(it) }, { Load.Failed })
     }
     LaunchedEffect(subscriptions.map { it.id }) {
         latest = if (subscriptions.isEmpty()) emptyList() else repo.latestFromSubscriptions(subscriptions).take(10)
@@ -256,10 +260,22 @@ private fun PodcastHome() {
             item { SectionHeader("Episode terbaru") }
             items(latest, key = { it.id }) { EpisodeRow(it, latest) }
         }
-        item { SectionHeader("Podcast teratas Indonesia") }
+        item {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(repo.negaraPodcast, key = { it.first }) { (kode, nama) ->
+                    GenreChip(nama, negara == kode) { negara = kode }
+                }
+            }
+        }
+        val namaNegara = repo.negaraPodcast.firstOrNull { it.first == negara }?.second
+            ?: negara.uppercase()
+        item { SectionHeader("Podcast teratas $namaNegara") }
         val chart = top
         if (chart is Load.Ready) itemsIndexed(chart.value, key = { _, p -> p.id }) { i, p -> PodcastRow(p, number = i + 1) }
-        status(chart, "Belum ada data podcast.") { attempt++ }
+        status(chart, "Belum ada data podcast untuk $namaNegara.") { attempt++ }
     }
 }
 

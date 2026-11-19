@@ -108,6 +108,32 @@ class PodcastRepository(
     val progress: Flow<Map<String, EpisodeProgressEntity>> =
         dao.allEpisodeProgress().map { list -> list.associateBy { it.episodeId } }
 
+    /**
+     * Storefront Apple yang ditawarkan di layar Jelajah.
+     *
+     * Daftarnya TETAP, bukan hasil panen, karena Apple tidak menerbitkan
+     * daftar storefront lewat RSS — yang ada hanya endpoint per negara yang
+     * menjawab 404 kalau kodenya tidak dikenal. Tiap kode di sini sudah
+     * diperiksa memulangkan tangga yang terisi.
+     *
+     * Radio memakai daftar negara dari radio-browser karena sumbernya memang
+     * menyediakannya; podcast tidak punya padanannya, jadi bentuknya berbeda
+     * dan itu disengaja.
+     */
+    val negaraPodcast: List<Pair<String, String>> = listOf(
+        "id" to "Indonesia", "us" to "Amerika Serikat", "gb" to "Inggris",
+        "au" to "Australia", "ca" to "Kanada", "jp" to "Jepang",
+        "kr" to "Korea Selatan", "in" to "India", "my" to "Malaysia",
+        "sg" to "Singapura", "ph" to "Filipina", "th" to "Thailand",
+        "vn" to "Vietnam", "de" to "Jerman", "fr" to "Prancis",
+        "es" to "Spanyol", "it" to "Italia", "nl" to "Belanda",
+        "se" to "Swedia", "pl" to "Polandia", "ru" to "Rusia",
+        "tr" to "Turki", "sa" to "Arab Saudi", "ae" to "Uni Emirat Arab",
+        "eg" to "Mesir", "za" to "Afrika Selatan", "ng" to "Nigeria",
+        "br" to "Brasil", "mx" to "Meksiko", "ar" to "Argentina",
+        "nz" to "Selandia Baru",
+    )
+
     /** Podcast teratas di [country] (urutan tangga Apple). */
     /**
      * Tangga podcast teratas. Apple RSS membatasi 100 entri per negara

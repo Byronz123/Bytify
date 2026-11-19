@@ -48,11 +48,22 @@ if hasattr(sys.stdout, "reconfigure"):
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 DIR_DATA = os.path.join(DIR, "..", "data")
-#: Dua mode, satu aturan ketat yang sama.
+#: Tiga mode, satu aturan ketat yang sama.
 #:   film   : catalog.json, id "lk21-", /search/movie
 #:   serial : series_catalog.json, id "series-", /search/tv
+#:   anime  : anikai_database.json, id "anikai-", /search/tv
 #: Serial dipisah karena endpoint pencariannya beda dan field tanggalnya
 #: `first_air_date`, bukan `release_date`.
+#:
+#: Mode anime ADA karena jembatan AniList hanya menjangkau 5.723 dari 8.007
+#: judul anikai; 2.284 sisanya tidak punya TMDB id sama sekali, dan tanpa TMDB
+#: id tidak ada subtitle. Sumbernya `anikai_database.json`, bukan katalog
+#: terbit, karena hanya di sana ada `altTitle` — judul romaji dari JSON-LD
+#: halaman anikai, yang sering justru itu yang terindeks TMDB.
+#:
+#: Mode ini hanya mencari di `/search/tv`. Film anime karena itu tidak akan
+#: tercocokkan, dan itu disengaja: subtitle per-episode memang hanya untuk
+#: yang punya episode.
 MODE = {
     "film": {
         "sumber": os.path.join(DIR_DATA, "catalog.json"),
@@ -74,8 +85,38 @@ MODE = {
         "keluaran": os.path.join(DIR_DATA, "series_match.json"),
         "daftar": os.path.join(DIR_DATA, "series_match_worklist.json"),
     },
+    "anime-film": {
+        "sumber": os.path.join(DIR_DATA, "anikai_database.json"),
+        "awalan": "anikai-",
+        "endpoint": "/search/movie",
+        "tanggal": "release_date",
+        "judulAsli": "original_title",
+        "type": "movie",
+        "keluaran": os.path.join(DIR_DATA, "anime_movie_match.json"),
+        "daftar": os.path.join(DIR_DATA, "anime_movie_worklist.json"),
+    },
+    "anime": {
+        "sumber": os.path.join(DIR_DATA, "anikai_database.json"),
+        "awalan": "anikai-",
+        "endpoint": "/search/tv",
+        "tanggal": "first_air_date",
+        "judulAsli": "original_name",
+        "type": "tv",
+        "keluaran": os.path.join(DIR_DATA, "anime_match.json"),
+        "daftar": os.path.join(DIR_DATA, "anime_match_worklist.json"),
+    },
 }
-AKTIF = MODE["serial"] if "--serial" in sys.argv else MODE["film"]
+if "--anime-film" in sys.argv:
+    # Anime BEREPISODE TUNGGAL adalah film, dan film tidak ada di /search/tv.
+    # 815 judul seperti itu karena itu tidak pernah dapat TMDB id — dan tanpa
+    # TMDB id tidak ada subtitle sama sekali.
+    AKTIF = MODE["anime-film"]
+elif "--anime" in sys.argv:
+    AKTIF = MODE["anime"]
+elif "--serial" in sys.argv:
+    AKTIF = MODE["serial"]
+else:
+    AKTIF = MODE["film"]
 
 SUMBER = os.path.join(DIR_DATA, "catalog.json")
 KELUARAN = AKTIF["keluaran"]
@@ -186,7 +227,17 @@ def cocokkan(film):
     if not isinstance(tahun, int):
         return "tanpa", {"alasan": "tahun katalog tidak ada"}
 
-    for kueri in kandidat_judul(judul):
+    # Judul alternatif (romaji dari JSON-LD anikai) dicoba sebagai bentuk
+    # TAMBAHAN, bukan sebagai pelonggaran: tiap bentuk tetap harus sama persis
+    # dengan judul TMDB, dan yang menunjuk lebih dari satu tetap dilewati.
+    bentuk = kandidat_judul(judul)
+    alt = film.get("judulAlt")
+    if alt:
+        for b in kandidat_judul(alt):
+            if normal(b) not in {normal(x) for x in bentuk}:
+                bentuk.append(b)
+
+    for kueri in bentuk:
         nk = normal(kueri)
         # Dipisah berdasarkan CARA cocoknya. Kecocokan pada judul utama lebih
         # kuat daripada pada judul asli saja, dan itu dipakai sebagai pemutus.
@@ -247,6 +298,29 @@ def cocokkan(film):
 def muat_katalog():
     with open(AKTIF["sumber"], encoding="utf-8") as f:
         d = json.load(f)
+    if AKTIF in (MODE["anime"], MODE["anime-film"]):
+        hanya_film = AKTIF is MODE["anime-film"]
+        # anikai_database.json adalah LARIK hasil panen, bukan katalog terbit.
+        # Hanya judul yang punya seal yang berguna: yang lain tidak terbit, jadi
+        # mencocokkannya hanya menghabiskan kuota TMDB.
+        keluar = []
+        for a in d:
+            aid, judul = a.get("anikaiId"), (a.get("title") or "").strip()
+            if not aid or not judul or not a.get("seal") or not a.get("server"):
+                continue
+            # Mode film hanya untuk judul berepisode tunggal; mode serial untuk
+            # sisanya. Memisahkannya menghindari dua ruang id TMDB bertabrakan
+            # pada judul yang sama.
+            satu_episode = len(a.get("episodes") or []) <= 1
+            if hanya_film != satu_episode:
+                continue
+            keluar.append({
+                "id": f"anikai-{aid}",
+                "title": judul,
+                "judulAlt": (a.get("altTitle") or "").strip(),
+                "releaseYear": a.get("year"),
+            })
+        return keluar
     return [m for m in (d.get("movies") or [])
             if str(m.get("id") or "").startswith(AKTIF["awalan"])]
 

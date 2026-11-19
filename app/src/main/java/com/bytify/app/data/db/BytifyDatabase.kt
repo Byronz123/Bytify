@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WatchAliasEntity::class,
         MovieGenreEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
@@ -266,9 +266,25 @@ abstract class BytifyDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Kolom `seasons` di `watch_titles` DAN `watch_aliases`.
+         *
+         * ALTER TABLE ADD COLUMN pada SQLite hanya menulis header tabel, jadi
+         * ia murah bahkan untuk 11.937 baris — berbeda dari MIGRATION_11_12
+         * yang sengaja membiarkan tabelnya kosong. Nilainya menyusul pada
+         * sinkron berikutnya; sampai itu terjadi `seasons` null dan penjaga
+         * subtitle serial tetap menolak, persis seperti sebelum migrasi ini.
+         */
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `watch_titles` ADD COLUMN `seasons` INTEGER")
+                database.execSQL("ALTER TABLE `watch_aliases` ADD COLUMN `seasons` INTEGER")
+            }
+        }
+
         fun create(context: Context): BytifyDatabase =
             Room.databaseBuilder(context, BytifyDatabase::class.java, "bytify.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build()
     }
 }

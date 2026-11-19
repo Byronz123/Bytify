@@ -29,6 +29,14 @@ backend/data/tmdb_match_worklist.json
 backend/data/series_match.json
 backend/data/series_match.json.*tmp
 backend/data/series_match_worklist.json
+# Pencocokan anime -> TMDB id (mode --anime dan --anime-film). Hasilnya
+# ikut terbit di anime_servers.json, jadi berkas mentahnya tidak dilacak.
+backend/data/anime_match.json
+backend/data/anime_match.json.*tmp
+backend/data/anime_match_worklist.json
+backend/data/anime_movie_match.json
+backend/data/anime_movie_match.json.*tmp
+backend/data/anime_movie_worklist.json
 # Dataset pemetaan anime (unduhan pihak ketiga) + turunannya.
 backend/data/anime_tmdb_source.json
 backend/data/anime_tmdb_source.json.*tmp

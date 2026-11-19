@@ -434,6 +434,10 @@ private const val GATE_BYPASS_JS = """
   // tidak memakai pembungkus, sehingga tidak ada yang menetapkan tingginya.
   // Di sini tingginya dipaksa dalam PIKSEL dari dokumen induk, karena ukuran
   // sebuah iframe hanya bisa ditetapkan dari induknya.
+  // Saklar percobaan: penjepit wadah dan pemaku video. Dibuat bisa dimatikan
+  // supaya sebabnya bisa DIPISAH, bukan ditebak — layar hitam dengan suara
+  // berjalan bisa datang dari aliran, dari tata letak, ATAU dari komposisi.
+  var BYTIFY_JEPIT = true;
   function pastikanTinggi(){
     try {
       var h = window.innerHeight || document.documentElement.clientHeight || 0;
@@ -450,11 +454,13 @@ private const val GATE_BYPASS_JS = """
       // kotak yang kita beri, sementara kontrolnya ditempatkan relatif
       // terhadap dokumen — jadi pusat dokumen jatuh di luar kotak. Menyamakan
       // tinggi dokumen dengan tinggi kotak membuat pusatnya kembali sama.
-      if (de) { de.style.height = h + 'px'; de.style.overflow = 'hidden'; }
-      if (b) {
-        b.style.height = h + 'px';
-        b.style.margin = '0';
-        b.style.overflow = 'hidden';
+      if (BYTIFY_JEPIT) {
+        if (de) { de.style.height = h + 'px'; de.style.overflow = 'hidden'; }
+        if (b) {
+          b.style.height = h + 'px';
+          b.style.margin = '0';
+          b.style.overflow = 'hidden';
+        }
       }
       var fr = document.querySelectorAll('iframe');
       for (var i = 0; i < fr.length; i++) {
@@ -469,6 +475,31 @@ private const val GATE_BYPASS_JS = """
       if (v && v.videoWidth > 0 && v.clientHeight < 2 && v.clientWidth > 2) {
         v.style.height = Math.round(v.clientWidth * v.videoHeight / v.videoWidth) + 'px';
       }
+      // VIDEO YANG DISEMBUNYIKAN pemutarnya sendiri dibuat terlihat lagi.
+      //
+      // Inilah sebab "ada suaranya tetapi gambarnya tidak bergerak", dan
+      // terukur di Galaxy A36: `BYTIFY_JALAN t=4351.49 maju=3.00 rs=4
+      // paused=false buf=4362.0 kotak=384x216@0,0 vis=visible op=0`. Aliran
+      // sehat, ukuran benar, waktu maju 3 detik tiap 3 detik — hanya
+      // opacity-nya NOL. Pemutar menyembunyikan videonya sambil menampilkan
+      // poster atau gerbang iklannya sendiri, lalu lupa mengembalikannya.
+      //
+      // Syaratnya `readyState >= 2`: sebelum ada data, video yang disembunyikan
+      // memang belum punya apa pun untuk ditampilkan, dan memaksanya hanya
+      // menukar hitam dengan hitam.
+      if (v && v.readyState >= 2) {
+        var gv = getComputedStyle(v);
+        if (parseFloat(gv.opacity || '1') < 0.05) {
+          v.style.setProperty('opacity', '1', 'important');
+        }
+        if (gv.visibility === 'hidden') {
+          v.style.setProperty('visibility', 'visible', 'important');
+        }
+        if (gv.display === 'none') {
+          v.style.setProperty('display', 'block', 'important');
+        }
+      }
+
       // WADAH yang lebih tinggi daripada viewport DIJEPIT ke tinggi viewport.
       //
       // Inilah sebab layar hitam yang sebenarnya, dan terukur: cinesrc
@@ -480,7 +511,7 @@ private const val GATE_BYPASS_JS = """
       //
       // Menjepit wadahnya, bukan memaksa posisi videonya, menjaga tata letak
       // pemutar tetap utuh: kontrol tetap di tempatnya relatif terhadap video.
-      if (v) {
+      if (v && BYTIFY_JEPIT) {
         var naik = v.parentElement, langkah = 0;
         while (naik && langkah < 8) {
           if (naik.offsetHeight > h + 4) {
@@ -658,6 +689,35 @@ private const val GATE_BYPASS_JS = """
   //
   // Yang dilaporkan hanya trek bertipe subtitle/caption, dan hanya dari frame
   // yang benar-benar memegang videonya.
+  // ---- Pemantau BERKALA: memisahkan "aliran macet" dari "gambar beku" ----
+  //
+  // Dua keluhan terdengar sama bagi penonton ("hitam", "tidak bergerak") tetapi
+  // sebabnya berlawanan, dan hanya satu angka yang memisahkannya:
+  // `currentTime`. Kalau ia MAJU sementara layar diam, alirannya sehat dan yang
+  // rusak komposisinya; kalau ia DIAM, alirannya yang berhenti. Tanpa angka ini
+  // perbaikan hanya tebakan.
+  var waktuLalu = -1;
+  function pantauBerkala(){
+    try {
+      var v = cariVideo();
+      if (!v) return;
+      var g = getComputedStyle(v);
+      var k = v.getBoundingClientRect();
+      var maju = (v.currentTime - waktuLalu);
+      waktuLalu = v.currentTime;
+      console.log('BYTIFY_JALAN t=' + v.currentTime.toFixed(2) +
+        ' maju=' + maju.toFixed(2) +
+        ' rs=' + v.readyState + ' paused=' + v.paused +
+        ' buf=' + (v.buffered.length ? v.buffered.end(v.buffered.length - 1).toFixed(1) : '0') +
+        ' kotak=' + Math.round(k.width) + 'x' + Math.round(k.height) +
+        '@' + Math.round(k.left) + ',' + Math.round(k.top) +
+        ' pos=' + g.position + ' vis=' + g.visibility + ' op=' + g.opacity +
+        ' tf=' + (g.transform === 'none' ? 'none' : 'ada') +
+        ' frame=' + (window.top === window ? 'utama' : 'anak'));
+    } catch (e) {}
+  }
+  setInterval(pantauBerkala, 3000);
+
   var trekTerlapor = '';
   function lihatTrek(){
     try {

@@ -124,7 +124,13 @@ async function bukaZipSrt(buffer) {
 
 /** Bentuk baris SubDL -> bentuk yang sama dengan hasil OpenSubtitles. */
 function rapikanSubdl(baris) {
-  const jalur = typeof baris?.url === 'string' ? baris.url : '';
+  const mentah = typeof baris?.url === 'string' ? baris.url : '';
+  // KUNCI API DIPOTONG DI SINI. SubDL menempelkan `?api_key=...` ke setiap
+  // `url` yang dipulangkannya, dan `fileId` ini diteruskan apa adanya ke APK —
+  // jadi tanpa pemotongan ini kuncinya ikut terbit ke setiap pengguna, persis
+  // yang dihindari 3g. Terukur TIDAK diperlukan: `dl.subdl.com` memulangkan
+  // ZIP 23.856 bait yang sama dengan maupun tanpa kunci.
+  const jalur = mentah.split('?')[0];
   if (!jalur) return null;
   const kode = String(baris.language || baris.lang || '').toLowerCase();
   return {
@@ -172,33 +178,52 @@ export function createSubtitleService(options = {}, log = console) {
   // tidak akan pernah punya subtitle Indonesia.
   //
   // Tanpa kunci, seluruh jalur ini DIAM: hasilnya persis seperti sebelumnya.
-  const subdlKey = String(options.subdlKey || '').trim();
+  // DUA kunci, bukan satu, dan itu disengaja: tingkat gratis SubDL dibatasi
+  // 1.000 permintaan per hari. Kunci kedua dipakai hanya kalau yang pertama
+  // ditolak karena kuota atau kredensial (401/403/429), jadi urutannya tetap
+  // dan hasilnya tidak berubah selama kunci pertama masih sehat.
+  const subdlKeys = (Array.isArray(options.subdlKeys) ? options.subdlKeys : [])
+    .map((k) => String(k || '').trim())
+    .filter(Boolean);
+  const subdlKey = subdlKeys[0] || '';
   const subdlBase = String(options.subdlBase || 'https://api.subdl.com').replace(/\/+$/, '');
   const subdlUnduh = String(options.subdlUnduh || 'https://dl.subdl.com').replace(/\/+$/, '');
 
+  /** Kode yang berarti "coba kunci berikutnya", bukan "judulnya tidak ada". */
+  function kunciHabis(status) {
+    return status === 401 || status === 403 || status === 429;
+  }
+
   async function cariSubdl({ id, bahasa, jenis, season, episode }) {
-    if (!subdlKey || !bahasa.length) return [];
-    const q = new URLSearchParams({
-      api_key: subdlKey,
-      tmdb_id: String(id),
-      // SubDL memakai kode BESAR dua huruf.
-      languages: bahasa.map((b) => b.toUpperCase()).join(','),
-      subs_per_page: '30',
-    });
-    if (jenis === 'episode') {
-      if (Number.isFinite(Number(season))) q.set('season_number', String(Number(season)));
-      if (Number.isFinite(Number(episode))) q.set('episode_number', String(Number(episode)));
+    if (!subdlKeys.length || !bahasa.length) return [];
+    for (let ke = 0; ke < subdlKeys.length; ke += 1) {
+      const q = new URLSearchParams({
+        api_key: subdlKeys[ke],
+        tmdb_id: String(id),
+        // SubDL memakai kode BESAR dua huruf.
+        languages: bahasa.map((b) => b.toUpperCase()).join(','),
+        subs_per_page: '30',
+      });
+      if (jenis === 'episode') {
+        if (Number.isFinite(Number(season))) q.set('season_number', String(Number(season)));
+        if (Number.isFinite(Number(episode))) q.set('episode_number', String(Number(episode)));
+      }
+      const resp = await fetchImpl(`${subdlBase}/api/v1/subtitles?${q.toString()}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) {
+        log.warn?.(`[subtitles] subdl kunci#${ke + 1} tmdb=${id} gagal: HTTP ${resp.status}`);
+        // Kunci berikutnya HANYA untuk penolakan kredensial/kuota. Galat lain
+        // (5xx, 404) berlaku sama untuk semua kunci, jadi mengulangnya cuma
+        // menghabiskan kuota kunci kedua tanpa mengubah hasil.
+        if (kunciHabis(resp.status) && ke + 1 < subdlKeys.length) continue;
+        return [];
+      }
+      const data = await resp.json().catch(() => null);
+      const baris = Array.isArray(data?.subtitles) ? data.subtitles : [];
+      return baris.map(rapikanSubdl).filter((x) => x && x.lang);
     }
-    const resp = await fetchImpl(`${subdlBase}/api/v1/subtitles?${q.toString()}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!resp.ok) {
-      log.warn?.(`[subtitles] subdl tmdb=${id} gagal: HTTP ${resp.status}`);
-      return [];
-    }
-    const data = await resp.json().catch(() => null);
-    const baris = Array.isArray(data?.subtitles) ? data.subtitles : [];
-    return baris.map(rapikanSubdl).filter((x) => x && x.lang);
+    return [];
   }
 
   function alasanTidakSiap() {
@@ -374,7 +399,7 @@ export function createSubtitleService(options = {}, log = console) {
     // kontrak `/api/subtitles/file` tidak berubah sama sekali bagi APK.
     const teksId = String(fileId || '');
     if (teksId.startsWith('subdl:')) {
-      if (!subdlKey) {
+      if (!subdlKeys.length) {
         return { status: 503, error: 'SUBDL_API_KEY belum diatur di environment.' };
       }
       const jalur = teksId.slice('subdl:'.length);
@@ -452,7 +477,11 @@ export function subtitleServiceDariEnv(env = ENV_BAWAAN, log = console) {
     termsAccepted: env.OPENSUBTITLES_TERMS_ACCEPTED === 'true',
     // Sumber kedua. Tanpa kunci, seluruh jalurnya diam dan hasilnya persis
     // seperti sebelum SubDL ada.
-    subdlKey: (env.SUBDL_API_KEY || '').trim(),
+    // Tiga ejaan diterima: satu kunci, atau dua yang dipakai bergantian.
+    // Yang kosong dibuang, jadi mengisi salah satunya saja tetap sah.
+    subdlKeys: [env.SUBDL_API_KEY, env.SUBDL_API_KEY_1, env.SUBDL_API_KEY_2]
+      .map((k) => (k || '').trim())
+      .filter(Boolean),
     subdlBase: (env.SUBDL_BASE_URL || 'https://api.subdl.com').trim(),
     subdlUnduh: (env.SUBDL_DOWNLOAD_URL || 'https://dl.subdl.com').trim(),
   }, log);

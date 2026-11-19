@@ -236,14 +236,15 @@ test('bukaZipSrt mengambil .srt dan melewati berkas lain', async () => {
 test('SubDL menambal bahasa yang tidak ada di OpenSubtitles', async () => {
     const dipanggil = [];
     const layanan = createSubtitleService({
-        apiKey: 'kunci', termsAccepted: true, subdlKey: 'kunci-subdl',
+        apiKey: 'kunci', termsAccepted: true, subdlKeys: ['kunci-subdl'],
         fetchImpl: async (url) => {
             dipanggil.push(String(url));
             if (String(url).includes('api.subdl.com')) {
                 return new Response(JSON.stringify({
                     status: true,
                     subtitles: [{
-                        language: 'indonesian', url: '/subtitle/99-99.zip',
+                        language: 'indonesian',
+                        url: '/subtitle/99-99.zip?api_key=rahasia-jangan-bocor',
                         release_name: 'Tumbal.Proyek.2026.id',
                     }],
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -283,4 +284,79 @@ test('tanpa SUBDL_API_KEY hasilnya persis seperti sebelumnya', async () => {
     assert.equal(hasil.status, 200);
     assert.deepEqual(hasil.subtitles, []);
     assert.equal(hasil.attribution, 'Subtitle dari OpenSubtitles.com');
+});
+
+// Dua kunci: yang kedua HANYA dipakai kalau yang pertama ditolak karena
+// kuota atau kredensial. Galat lain tidak boleh menghabiskan kunci cadangan.
+test('kunci SubDL kedua dipakai saat yang pertama kehabisan kuota', async () => {
+    const dipakai = [];
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true,
+        subdlKeys: ['habis', 'cadangan'],
+        fetchImpl: async (url) => {
+            const alamat = String(url);
+            if (alamat.includes('api.subdl.com')) {
+                const kunci = new URL(alamat).searchParams.get('api_key');
+                dipakai.push(kunci);
+                if (kunci === 'habis') return new Response('{}', { status: 429 });
+                return new Response(JSON.stringify({
+                    subtitles: [{ language: 'indonesian', url: '/subtitle/7-7.zip' }],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }, { warn() {}, error() {} });
+
+    const hasil = await layanan.cari({ tmdbId: 1469930, languages: 'id' });
+    assert.deepEqual(dipakai, ['habis', 'cadangan']);
+    assert.equal(hasil.subtitles.length, 1);
+    assert.equal(hasil.subtitles[0].lang, 'id');
+});
+
+test('galat server TIDAK menghabiskan kunci SubDL kedua', async () => {
+    const dipakai = [];
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true,
+        subdlKeys: ['satu', 'dua'],
+        fetchImpl: async (url) => {
+            const alamat = String(url);
+            if (alamat.includes('api.subdl.com')) {
+                dipakai.push(new URL(alamat).searchParams.get('api_key'));
+                return new Response('{}', { status: 500 });
+            }
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }, { warn() {}, error() {} });
+
+    await layanan.cari({ tmdbId: 1, languages: 'id' });
+    assert.deepEqual(dipakai, ['satu']);
+});
+
+// Kunci API SubDL TIDAK BOLEH ikut ke APK. SubDL menempelkannya ke setiap
+// `url`, dan `fileId` diteruskan apa adanya ke aplikasi.
+test('kunci SubDL dipotong dari fileId', async () => {
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true, subdlKeys: ['rahasia-jangan-bocor'],
+        fetchImpl: async (url) => {
+            if (String(url).includes('api.subdl.com')) {
+                return new Response(JSON.stringify({
+                    subtitles: [{
+                        language: 'indonesian',
+                        url: '/subtitle/3678808-8595795.zip?api_key=rahasia-jangan-bocor',
+                    }],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }, { warn() {}, error() {} });
+    const hasil = await layanan.cari({ tmdbId: 1469930, languages: 'id' });
+    const teks = JSON.stringify(hasil);
+    assert.doesNotMatch(teks, /rahasia-jangan-bocor/);
+    assert.equal(hasil.subtitles[0].fileId, 'subdl:/subtitle/3678808-8595795.zip');
 });

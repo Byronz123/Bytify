@@ -81,6 +81,67 @@ function terbaikPerBahasa(daftar, bahasa) {
   return keluar;
 }
 
+/**
+ * Mengambil berkas .srt PERTAMA dari sebuah arsip ZIP.
+ *
+ * SubDL menyajikan subtitlenya sebagai ZIP, sementara APK mengharapkan teks
+ * SRT apa adanya. Membongkarnya di server adalah satu-satunya pilihan: APK
+ * tidak punya pembongkar ZIP, dan menambahkannya hanya untuk ini jauh lebih
+ * mahal daripada 60 baris di sini.
+ *
+ * `DecompressionStream('deflate-raw')` ada di Cloudflare Workers maupun Node
+ * 18+, jadi tidak ada ketergantungan baru. Entri yang disimpan tanpa kompresi
+ * (metode 0) ikut ditangani karena ZIP kecil sering memakainya.
+ */
+async function bukaZipSrt(buffer) {
+  const data = new Uint8Array(buffer);
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let i = 0;
+  while (i + 30 <= data.length) {
+    if (dv.getUint32(i, true) !== 0x04034b50) break;
+    const metode = dv.getUint16(i + 8, true);
+    let terkompresi = dv.getUint32(i + 18, true);
+    const panjangNama = dv.getUint16(i + 26, true);
+    const panjangExtra = dv.getUint16(i + 28, true);
+    const awalNama = i + 30;
+    const nama = new TextDecoder().decode(data.subarray(awalNama, awalNama + panjangNama));
+    const awalData = awalNama + panjangNama + panjangExtra;
+    // Ukuran 0 di header lokal berarti ukurannya ada di data descriptor
+    // SESUDAH isinya. Entri seperti itu dilewati, bukan ditebak.
+    if (terkompresi === 0 && metode !== 0) break;
+    if (/\.(srt|vtt)$/i.test(nama)) {
+      const potong = data.subarray(awalData, awalData + terkompresi);
+      if (metode === 0) return new TextDecoder('utf-8').decode(potong);
+      const aliran = new Blob([potong]).stream()
+        .pipeThrough(new DecompressionStream('deflate-raw'));
+      const isi = await new Response(aliran).arrayBuffer();
+      return new TextDecoder('utf-8').decode(new Uint8Array(isi));
+    }
+    i = awalData + terkompresi;
+  }
+  return null;
+}
+
+/** Bentuk baris SubDL -> bentuk yang sama dengan hasil OpenSubtitles. */
+function rapikanSubdl(baris) {
+  const jalur = typeof baris?.url === 'string' ? baris.url : '';
+  if (!jalur) return null;
+  const kode = String(baris.language || baris.lang || '').toLowerCase();
+  return {
+    // Awalan `subdl:` adalah penanda sumbernya. `tautan()` memakainya untuk
+    // memilih jalur unduh, jadi id ini TIDAK boleh berupa angka saja.
+    fileId: `subdl:${jalur}`,
+    fileName: baris.release_name || baris.name || null,
+    lang: kode.startsWith('indo') ? 'id' : kode.slice(0, 2) || null,
+    release: baris.release_name || null,
+    downloads: 0,
+    hearingImpaired: baris.hi === true,
+    fps: null,
+    uploadedAt: null,
+    sumber: 'subdl',
+  };
+}
+
 export function createSubtitleService(options = {}, log = console) {
   const {
     apiKey = '',
@@ -102,6 +163,44 @@ export function createSubtitleService(options = {}, log = console) {
   const siap = Boolean(apiKey) && termsAccepted;
 
   /** Alasan tidak siap, supaya endpoint bisa menjawab 503 yang informatif. */
+  // --- SubDL: sumber KEDUA, menambal yang tidak dimiliki OpenSubtitles ---
+  //
+  // Diukur: OpenSubtitles tidak punya subtitle Indonesia untuk rilis Indonesia
+  // baru sama sekali (`tmdb 1525059` dan `tmdb 1589663` nol berkas), sementara
+  // SubDL memilikinya — halaman "Project Sacrifice (2026)" mencatat 8 subtitle
+  // dalam 6 bahasa termasuk Indonesia. Tanpa sumber kedua, film Indonesia
+  // tidak akan pernah punya subtitle Indonesia.
+  //
+  // Tanpa kunci, seluruh jalur ini DIAM: hasilnya persis seperti sebelumnya.
+  const subdlKey = String(options.subdlKey || '').trim();
+  const subdlBase = String(options.subdlBase || 'https://api.subdl.com').replace(/\/+$/, '');
+  const subdlUnduh = String(options.subdlUnduh || 'https://dl.subdl.com').replace(/\/+$/, '');
+
+  async function cariSubdl({ id, bahasa, jenis, season, episode }) {
+    if (!subdlKey || !bahasa.length) return [];
+    const q = new URLSearchParams({
+      api_key: subdlKey,
+      tmdb_id: String(id),
+      // SubDL memakai kode BESAR dua huruf.
+      languages: bahasa.map((b) => b.toUpperCase()).join(','),
+      subs_per_page: '30',
+    });
+    if (jenis === 'episode') {
+      if (Number.isFinite(Number(season))) q.set('season_number', String(Number(season)));
+      if (Number.isFinite(Number(episode))) q.set('episode_number', String(Number(episode)));
+    }
+    const resp = await fetchImpl(`${subdlBase}/api/v1/subtitles?${q.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!resp.ok) {
+      log.warn?.(`[subtitles] subdl tmdb=${id} gagal: HTTP ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json().catch(() => null);
+    const baris = Array.isArray(data?.subtitles) ? data.subtitles : [];
+    return baris.map(rapikanSubdl).filter((x) => x && x.lang);
+  }
+
   function alasanTidakSiap() {
     if (!apiKey) return 'OPENSUBTITLES_API_KEY belum diatur di environment.';
     if (!termsAccepted) {
@@ -235,12 +334,29 @@ export function createSubtitleService(options = {}, log = console) {
 
     const baris = Array.isArray(hasil.data?.data) ? hasil.data.data : [];
     const semua = baris.map(rapikan).filter(Boolean);
+    const terpilih = terbaikPerBahasa(semua, bahasa);
+
+    // SubDL hanya menambal bahasa yang BELUM ada, tidak menggeser apa pun.
+    // Urutannya disengaja: OpenSubtitles punya `download_count` sebagai sinyal
+    // kualitas, SubDL tidak, jadi yang terukur didahulukan.
+    const kurang = bahasa.filter((k) => !terpilih.some((x) => x.lang === k));
+    let dariSubdl = [];
+    if (kurang.length) {
+      dariSubdl = await cariSubdl({ id, bahasa: kurang, jenis, season, episode });
+      for (const kode of kurang) {
+        const cocok = dariSubdl.find((x) => x.lang === kode);
+        if (cocok) terpilih.push(cocok);
+      }
+    }
+
     const nilai = {
       tmdbId: id,
       languages: bahasa,
-      subtitles: terbaikPerBahasa(semua, bahasa),
-      totalFound: semua.length,
-      attribution: 'Subtitle dari OpenSubtitles.com',
+      subtitles: terpilih,
+      totalFound: semua.length + dariSubdl.length,
+      attribution: dariSubdl.length
+        ? 'Subtitle dari OpenSubtitles.com dan SubDL.com'
+        : 'Subtitle dari OpenSubtitles.com',
     };
     singgahan.set(kunci, { pada: Date.now(), nilai });
     return { status: 200, ...nilai };
@@ -252,6 +368,38 @@ export function createSubtitleService(options = {}, log = console) {
    */
   async function tautan({ fileId } = {}) {
     if (!siap) return { status: 503, error: alasanTidakSiap() };
+
+    // Berkas SubDL dikirim sebagai ISI, bukan pengalihan: yang ada di sana ZIP,
+    // sementara APK mengharapkan teks SRT. Membongkarnya di server membuat
+    // kontrak `/api/subtitles/file` tidak berubah sama sekali bagi APK.
+    const teksId = String(fileId || '');
+    if (teksId.startsWith('subdl:')) {
+      if (!subdlKey) {
+        return { status: 503, error: 'SUBDL_API_KEY belum diatur di environment.' };
+      }
+      const jalur = teksId.slice('subdl:'.length);
+      if (!jalur.startsWith('/')) {
+        return { status: 400, error: 'Jalur berkas SubDL tidak sah.' };
+      }
+      const resp = await fetchImpl(`${subdlUnduh}${jalur}`, {
+        headers: { Accept: 'application/zip,*/*' },
+      });
+      if (!resp.ok) {
+        return { status: 502, error: `SubDL menjawab HTTP ${resp.status}.` };
+      }
+      const srt = await bukaZipSrt(await resp.arrayBuffer());
+      if (!srt) {
+        return { status: 502, error: 'Arsip SubDL tidak berisi berkas .srt.' };
+      }
+      return {
+        status: 200,
+        body: srt,
+        contentType: 'application/x-subrip; charset=utf-8',
+        fileName: jalur.split('/').pop() || null,
+        attribution: 'Subtitle dari SubDL.com',
+      };
+    }
+
     const id = Number.parseInt(fileId, 10);
     if (!Number.isFinite(id) || id <= 0) {
       return { status: 400, error: 'fileId wajib berupa angka positif.' };
@@ -302,7 +450,12 @@ export function subtitleServiceDariEnv(env = ENV_BAWAAN, log = console) {
     // Gerbang sadar: sama seperti LIVE_SOURCE_RIGHTS_CONFIRMED pada lapisan
     // Live TV, pemakaian API pihak ketiga harus diakui eksplisit dulu.
     termsAccepted: env.OPENSUBTITLES_TERMS_ACCEPTED === 'true',
+    // Sumber kedua. Tanpa kunci, seluruh jalurnya diam dan hasilnya persis
+    // seperti sebelum SubDL ada.
+    subdlKey: (env.SUBDL_API_KEY || '').trim(),
+    subdlBase: (env.SUBDL_BASE_URL || 'https://api.subdl.com').trim(),
+    subdlUnduh: (env.SUBDL_DOWNLOAD_URL || 'https://dl.subdl.com').trim(),
   }, log);
 }
 
-export { normalkanBahasa, rapikan, terbaikPerBahasa, BASIS_DEFAULT };
+export { normalkanBahasa, rapikan, rapikanSubdl, terbaikPerBahasa, bukaZipSrt, BASIS_DEFAULT };

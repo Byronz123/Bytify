@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createApp } from '../server.mjs';
-import { createSubtitleService, normalkanBahasa } from '../src/subtitles.mjs';
+import { createSubtitleService, normalkanBahasa, bukaZipSrt } from '../src/subtitles.mjs';
 
 /**
  * Upstream OpenSubtitles ditiru supaya kontrak endpoint ini teruji di CI tanpa
@@ -216,4 +216,71 @@ test('normalisasi bahasa membuang yang tidak berbentuk kode ISO', () => {
     assert.deepEqual(normalkanBahasa('id,id,en'), ['id', 'en'], 'duplikat dibuang');
     assert.deepEqual(normalkanBahasa('!!!'), ['id', 'en'], 'sampah jatuh ke bawaan');
     assert.equal(normalkanBahasa('a,b,c,d,e,f,g,h').length <= 5, true, 'dibatasi 5 bahasa');
+});
+
+// ZIP berisi satu berkas sampah dan satu .srt, dibuat dengan deflate biasa.
+const ZIP_UJI = 'UEsDBBQAAAAIAN24c12SgjGqEAAAAA4AAAALAAAAY2F0YXRhbi50eHRLKs1OzFMoLk0qySzJSQUAUEsDBBQAAAAIAN24c10O30lbLgAAADYAAAAZAAAAVHVtYmFsLlByb3llay4yMDI2LmlkLnNydDPkMjCwAiFDHQMDAwVdXTsFqIAxSIDLMbtUITc1rzQnszivMlGhNCcxL12PCwBQSwECFAAUAAAACADduHNdkoIxqhAAAAAOAAAACwAAAAAAAAAAAAAAgAEAAAAAY2F0YXRhbi50eHRQSwECFAAUAAAACADduHNdDt9JWy4AAAA2AAAAGQAAAAAAAAAAAAAAgAE5AAAAVHVtYmFsLlByb3llay4yMDI2LmlkLnNydFBLBQYAAAAAAgACAIAAAACeAAAAAAA=';
+
+test('bukaZipSrt mengambil .srt dan melewati berkas lain', async () => {
+    const biner = Buffer.from(ZIP_UJI, 'base64');
+    const srt = await bukaZipSrt(biner.buffer.slice(
+        biner.byteOffset, biner.byteOffset + biner.byteLength,
+    ));
+    assert.match(srt, /Aku menulisnya ulang\./);
+    assert.doesNotMatch(srt, /bukan subtitle/);
+});
+
+// SubDL hanya MENAMBAL bahasa yang tidak dimiliki OpenSubtitles. Uji ini
+// menjaga dua sifat sekaligus: yang sudah ada tidak tergeser, dan yang kurang
+// benar-benar terisi.
+test('SubDL menambal bahasa yang tidak ada di OpenSubtitles', async () => {
+    const dipanggil = [];
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true, subdlKey: 'kunci-subdl',
+        fetchImpl: async (url) => {
+            dipanggil.push(String(url));
+            if (String(url).includes('api.subdl.com')) {
+                return new Response(JSON.stringify({
+                    status: true,
+                    subtitles: [{
+                        language: 'indonesian', url: '/subtitle/99-99.zip',
+                        release_name: 'Tumbal.Proyek.2026.id',
+                    }],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            return new Response(JSON.stringify({
+                data: [{
+                    attributes: {
+                        language: 'en', release: 'EN rilis', download_count: 9,
+                        files: [{ file_id: 11, file_name: 'en.srt' }],
+                    },
+                }],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        },
+    }, { warn() {}, error() {} });
+
+    const hasil = await layanan.cari({ tmdbId: 1469930, languages: 'id,en' });
+    assert.equal(hasil.status, 200);
+    const bahasa = hasil.subtitles.map((x) => x.lang).sort();
+    assert.deepEqual(bahasa, ['en', 'id']);
+    const indo = hasil.subtitles.find((x) => x.lang === 'id');
+    assert.equal(indo.fileId, 'subdl:/subtitle/99-99.zip');
+    assert.match(hasil.attribution, /SubDL/);
+    assert.ok(dipanggil.some((u) => u.includes('api.subdl.com')));
+});
+
+test('tanpa SUBDL_API_KEY hasilnya persis seperti sebelumnya', async () => {
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true,
+        fetchImpl: async (url) => {
+            assert.ok(!String(url).includes('subdl'), 'SubDL tidak boleh ditembak tanpa kunci');
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }, { warn() {}, error() {} });
+    const hasil = await layanan.cari({ tmdbId: 1, languages: 'id,en' });
+    assert.equal(hasil.status, 200);
+    assert.deepEqual(hasil.subtitles, []);
+    assert.equal(hasil.attribution, 'Subtitle dari OpenSubtitles.com');
 });

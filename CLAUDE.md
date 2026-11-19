@@ -883,6 +883,44 @@ videonya, sementara poster dan lapisan kontrol menutupinya. Yang bekerja
 `position:fixed` di sudut kiri-atas dengan `zIndex` tertinggi. Sesudahnya
 `kotak=384x216@0,0` dan gambar "LEGENDARY PICTURES" tampil.
 
+### 3x. SubDL sebagai sumber subtitle KEDUA
+
+OpenSubtitles tidak punya subtitle Indonesia untuk rilis Indonesia baru —
+diukur lewat API produksi: `tmdb 1525059` dan `tmdb 1589663` nol berkas,
+`tmdb 1469930` satu berkas berbahasa Inggris. SubDL punya: halaman
+"Project Sacrifice (2026)" (judul Inggris Tumbal Proyek) mencatat
+"8 subtitles across 6 languages — English, Indonesian, Malay, Albanian,
+Bangla". Jadi lubangnya bukan di kode kita, melainkan di satu sumber yang
+dipakai sendirian.
+
+Sumber kedua itu kini terpasang, dan berlaku untuk SELURUH film — jalurnya
+berkunci `tmdbId`, bukan judul tertentu.
+
+Empat sifat yang mengikat bentuknya:
+
+- **SubDL hanya MENAMBAL bahasa yang belum ada.** Yang sudah dipulangkan
+  OpenSubtitles tidak pernah tergeser, karena hanya OpenSubtitles yang punya
+  `download_count` sebagai sinyal kualitas. SubDL tidak punya padanannya, jadi
+  memakainya untuk menggantikan yang terukur adalah kemunduran.
+- **Tanpa `SUBDL_API_KEY`, seluruh jalurnya DIAM.** Hasilnya persis seperti
+  sebelum SubDL ada, dan itu dijaga uji sendiri — termasuk bahwa api.subdl.com
+  tidak ditembak sama sekali.
+- **ZIP dibongkar di SERVER, bukan di APK.** SubDL menyajikan `.zip` sementara
+  APK mengharapkan teks SRT. `bukaZipSrt()` membaca header lokal ZIP dan
+  memakai `DecompressionStream('deflate-raw')` — ada di Cloudflare Workers
+  maupun Node 18+, jadi nol ketergantungan baru. Entri tersimpan tanpa
+  kompresi (metode 0) ikut ditangani; entri yang ukurannya ada di data
+  descriptor DILEWATI, bukan ditebak.
+- **Kontrak `/api/subtitles/file` tidak berubah bagi APK.** OpenSubtitles tetap
+  dijawab 302 supaya kuotanya baru terpakai saat berkasnya benar-benar
+  diunduh; SubDL dijawab dengan ISI berkasnya. `fileId` berawalan `subdl:`
+  itulah yang memilih jalur — jadi id SubDL sengaja BUKAN angka.
+
+Kuncinya harus didaftarkan MANUSIA: halaman redeem memakai captcha dan
+verifikasi email. Sesudah diisi, ingat jebakan yang sudah tercatat —
+mengubah environment variable di Cloudflare TIDAK berlaku untuk deployment
+yang sudah ada, jadi harus ada deploy baru.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

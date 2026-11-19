@@ -24,6 +24,18 @@ export async function onRequestGet({ request, env }) {
             headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' },
         });
     }
+    // SubDL dikirim sebagai ISI (sudah dibongkar dari ZIP); OpenSubtitles tetap
+    // sebagai pengalihan supaya kuotanya baru terpakai saat berkasnya diunduh.
+    if (typeof hasil.body === 'string') {
+        return new Response(hasil.body, {
+            status: 200,
+            headers: {
+                'Content-Type': hasil.contentType || 'text/plain; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-store',
+            },
+        });
+    }
     return new Response(null, {
         status: 302,
         headers: {

@@ -256,6 +256,12 @@ export function createApp({
             });
         }
         res.setHeader('Cache-Control', 'no-store');
+        // SubDL dikirim sebagai ISI (sudah dibongkar dari ZIP); OpenSubtitles
+        // tetap sebagai pengalihan supaya kuotanya baru terpakai saat diunduh.
+        if (typeof hasil.body === 'string') {
+            res.setHeader('Content-Type', hasil.contentType || 'text/plain; charset=utf-8');
+            return res.send(hasil.body);
+        }
         return res.redirect(302, hasil.link);
     });
 

@@ -1075,6 +1075,56 @@ padahal yang rusak penyisipan kita sendiri.
 Tumbal Proyek (2026) tetap tidak ada di vaplayer — itu katalog penyedianya,
 bukan pemutar kita (3v).
 
+### 3ac. novashow butuh TIGA parameter, dan Referer frame bersarang
+
+novashow hitam bukan karena halamannya kosong — catatan lama "HTTP 200 dengan
+NOL bait" salah. `/player` membangun `embedUrl` dari `server` DAN `type`;
+dengan `?id=` saja `embedUrl` tetap string kosong, iframe-nya tidak pernah
+diberi alamat, dan yang tampil layar hitam. Alamatnya kini
+`?id=<tmdb>&type=movie&server=vidfast`.
+
+`server=vidfast` menunjuk `vidsrc.sh`, satu-satunya pemutar di daftar novashow
+yang belum kita punya sendiri; cinesrc, vidzee, vaplayer dan vidlink sudah jadi
+kamar terpisah, jadi melewatinya lewat novashow hanya menambah lapisan tanpa
+menambah jangkauan. Dari daftar yang sama `vixsrc.to` dipasang sebagai pemutar
+LANGSUNG; `vidsync.live` TIDAK — ia menjawab HTTP 523 untuk kedua judul uji.
+
+**Referer frame bersarang harus yang DIPAKAI WebView, bukan tebakan kita.**
+Frame bersarang dulu selalu diberi `videoUrl`, alamat server terluar. Untuk
+rantai tiga lapis itu salah: novashow -> `vidsrc.sh` ->
+`stellarconductornexus.com`, yang menyemat frame terdalam `vidsrc.sh`
+sementara kita mengaku novashow. Terukur: `player tidak disisipi (403
+text/html)`, dokumennya lalu dimuat WebView tanpa skrip kita, dan frame yang
+memegang `<video>` tidak pernah bisa melaporkan `BYTIFY_SIAP`. Sekarang
+`request.requestHeaders["Referer"]` dipakai lebih dulu.
+
+Terukur di Galaxy A36 sesudahnya: novashow 2/3 (Inception `t=174.91 rs=4`,
+Interstellar `t=88.68 rs=4`, keduanya host `stellarconductornexus.com`),
+vixsrc 2/3 (Inception `t=37.13`, Interstellar `t=37.01`). Tumbal Proyek (2026)
+tidak ada di keduanya — katalog penyedianya (3v). `novashow.live` keluar dari
+`HOST_MATI`.
+
+### 3ad. Yang dinaikkan WADAH video, bukan elemen videonya
+
+Pemutar yang videonya dicabut ke `position:fixed` + z-index tertinggi (3w)
+tampil, tetapi TIDAK BISA DISENTUH. Kontrol pemutar adalah saudara video di
+dalam wadah yang sama, jadi begitu video naik sendirian, kontrolnya tertinggal
+di bawah dan setiap ketukan mendarat di elemen video.
+
+Terukur di Galaxy A36 pada vidcore (Tumbal Proyek): film berjalan,
+`pos=fixed`, dan ketukan di tengah video tidak mengubah apa pun —
+`paused=false` sebelum dan sesudah. Penonton hanya bisa mengikuti apa yang
+diputar: tidak bisa menjeda, tidak bisa menggeser waktu.
+
+Yang dinaikkan sekarang `v.parentElement`, dengan videonya diisi
+`position:absolute; width:100%; height:100%` di dalamnya. Video dan kontrolnya
+naik bersama, susunan asli pemutar tetap utuh.
+
+Terukur sesudahnya, pada judul dan server yang sama: `pos=absolute`, kontrol
+muncul saat diketuk, jeda `paused=true`, lanjut `paused=false`, dan tombol +10
+memberi `maju=10.00`. vidlink dan cinezo tetap berputar, jadi perbaikan ini
+tidak menukar satu pemutar dengan pemutar lain.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

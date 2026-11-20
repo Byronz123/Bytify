@@ -569,14 +569,47 @@ private const val GATE_BYPASS_JS = """
           // zIndex setinggi mungkin karena pemutar menaruh poster dan lapisan
           // kontrolnya DI ATAS video; begitu videonya dicabut dari tata letak,
           // lapisan itu menutupinya.
-          v.style.position = 'fixed';
-          v.style.top = '0';
-          v.style.left = '0';
-          v.style.width = '100vw';
-          v.style.height = h + 'px';
+          // Yang dinaikkan WADAH video, bukan elemen videonya sendiri.
+          //
+          // Mencabut video saja membuatnya tampil tetapi TIDAK BISA DISENTUH:
+          // kontrol pemutar (jeda, geser waktu) adalah saudara video di dalam
+          // wadah yang sama, jadi begitu video naik sendirian ke z-index
+          // tertinggi, kontrolnya tertinggal di bawah dan setiap ketukan
+          // mendarat di video. Terukur di Galaxy A36 pada vidcore: film
+          // berjalan, `pos=fixed`, dan ketukan di tengah video tidak mengubah
+          // apa pun — `paused=false` sebelum dan sesudah.
+          //
+          // Menaikkan wadahnya membawa video DAN kontrolnya sekaligus,
+          // sehingga susunan asli pemutar tetap utuh.
+          var wadah = v.parentElement;
+          var sasaranNaik = wadah || v;
+          sasaranNaik.style.setProperty('position', 'fixed', 'important');
+          sasaranNaik.style.setProperty('top', '0', 'important');
+          sasaranNaik.style.setProperty('left', '0', 'important');
+          sasaranNaik.style.setProperty('width', '100vw', 'important');
+          sasaranNaik.style.setProperty('height', h + 'px', 'important');
+          sasaranNaik.style.setProperty('z-index', '2147483646', 'important');
+          sasaranNaik.style.setProperty('background', '#000', 'important');
+          if (wadah) {
+            v.style.setProperty('position', 'absolute', 'important');
+            v.style.setProperty('top', '0', 'important');
+            v.style.setProperty('left', '0', 'important');
+            v.style.setProperty('width', '100%', 'important');
+            v.style.setProperty('height', '100%', 'important');
+          } else {
+            v.style.width = '100vw';
+            v.style.height = h + 'px';
+          }
           v.style.objectFit = 'contain';
-          v.style.zIndex = '2147483646';
-          v.style.background = '#000';
+          // Video yang dinaikkan ke atas segalanya TIDAK BOLEH ikut menerima
+          // sentuhan. Lapisan kontrol pemutar (jeda, geser waktu, kualitas)
+          // berada DI BAWAHnya sesudah ini, jadi tanpa `pointer-events: none`
+          // setiap ketukan mendarat di elemen video dan penonton kehilangan
+          // kendali atas film yang sedang berjalan — hanya bisa mengikuti apa
+          // yang diputar. Elemen video sendiri tidak membutuhkan sentuhan:
+          // ketukan otomatis kita dikirim sebagai MotionEvent di tingkat
+          // WebView, bukan ke elemen ini.
+          v.style.pointerEvents = 'none';
           if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
         }
       }
@@ -1307,6 +1340,12 @@ private val PROFIL: List<Pair<String, ProfilServer>> = listOf(
     "vidlink.pro" to ProfilServer(jedaKetukMs = 6000L),
     "cinesrc.st" to ProfilServer(jedaKetukMs = 6000L),
     "vidcore.io" to ProfilServer(jedaKetukMs = 6000L),
+    // vixsrc: pemutar langsung dari daftar novashow (`server=autoembed`).
+    "vixsrc.to" to ProfilServer(jedaKetukMs = 6000L),
+    // vidsrc.sh: yang sebenarnya diputar novashow lewat `server=vidfast`.
+    // Ia hidup DI DALAM iframe novashow, jadi kamarnya terpisah dari kamar
+    // situs induknya.
+    "vidsrc.sh" to ProfilServer(jedaKetukMs = 6000L),
 )
 
 /** Kamar untuk [url]; bawaannya dipakai bila hostnya belum dikenal. */
@@ -1356,10 +1395,6 @@ private val TANPA_PROKSI = listOf("veloflix.my.id")
 private val HOST_MATI = listOf(
     "framextv",
     "vidsrc.cc",
-    // 0/3 film, dan sebabnya terlihat dari luar: `novashow.live/player?id=`
-    // menjawab HTTP 200 dengan NOL bait. Halamannya kosong, jadi tidak ada
-    // yang bisa dimuat.
-    "novashow.live",
 )
 
 // CATATAN STATUS veloflix (belum selesai, jangan dianggap beres):
@@ -2599,7 +2634,25 @@ private fun EmbedVideoStage(
                                 (reqUrl == urlUtama || mintaDokumen)
                             ) {
                                 val alamat = request.url.toString()
-                                val asal = if (reqUrl == urlUtama) referer else videoUrl
+                                // Referer: yang DIPAKAI WebView sendiri untuk
+                                // frame ini, bukan tebakan kita.
+                                //
+                                // Frame bersarang dulu selalu diberi `videoUrl`,
+                                // yaitu alamat server paling luar. Untuk rantai
+                                // tiga lapis itu salah: terukur pada novashow ->
+                                // vidsrc.sh -> stellarconductornexus.com, yang
+                                // menyemat frame terdalam adalah vidsrc.sh,
+                                // sementara kita mengaku novashow — dan
+                                // penyedianya menjawab `player tidak disisipi
+                                // (403 text/html)`. Dokumennya lalu dimuat
+                                // WebView tanpa skrip kita, sehingga frame yang
+                                // memegang <video> tidak pernah bisa melaporkan
+                                // BYTIFY_SIAP dan servernya dibuang watchdog.
+                                val refererFrame = request.requestHeaders
+                                    ?.entries?.firstOrNull { it.key.equals("Referer", true) }
+                                    ?.value
+                                val asal = refererFrame?.takeIf { it.isNotBlank() }
+                                    ?: if (reqUrl == urlUtama) referer else videoUrl
                                 runCatching {
                                     val pembangun = OkRequest.Builder().url(alamat)
                                         .header("User-Agent", EMBED_USER_AGENT)

@@ -165,13 +165,37 @@ private val RUTE = listOf(
         { id, musim, episode -> "https://holaflix.cc/play/tv/$id?s=$musim&e=$episode" },
     ),
     RuteEmbed(
-        // Sama seperti holaflix: situs berkunci TMDB id dengan tujuh penyedia
-        // di dalamnya. Daftar penyedianya yang menuntun ke cinezo dan vidzee.
+        // Situs berkunci TMDB id, dan alamatnya BUTUH TIGA parameter.
+        //
+        // Halaman `/player` membangun `embedUrl` dari `server` DAN `type`;
+        // tanpa keduanya `embedUrl` tetap string kosong, iframe-nya tidak
+        // pernah diberi alamat, dan yang tampil layar hitam. Itu sebab
+        // novashow sempat tercatat 0/3 — bukan situsnya yang kosong,
+        // melainkan alamat yang kita bentuk yang belum lengkap.
+        //
+        // `server=vidfast` dipilih karena ia menunjuk `vidsrc.sh`, satu-satunya
+        // pemutar di daftar novashow yang BELUM kita punya sendiri; penyedia
+        // lainnya (cinesrc, vidzee, vaplayer, vidlink) sudah jadi kamar
+        // terpisah, jadi melewatinya lewat novashow hanya menambah satu
+        // lapisan tanpa menambah jangkauan.
         "novashow",
-        { id -> "https://novashow.live/player?id=$id" },
+        { id -> "https://novashow.live/player?id=$id&type=movie&server=vidfast" },
         { id, musim, episode ->
-            "https://novashow.live/player?id=$id&type=tv&season=$musim&episode=$episode"
+            "https://novashow.live/player?id=$id&type=tv&season=$musim" +
+                "&episode=$episode&server=vidfast"
         },
+    ),
+    RuteEmbed(
+        // Pemutar LANGSUNG, ditemukan dari daftar novashow (`server=autoembed`).
+        // Dibuka sendiri ia menjawab HTTP 200 dengan halaman pemutar untuk
+        // `tmdb 27205` maupun `tmdb 1469930`, jadi katalognya tidak terbatas
+        // pada judul lama saja.
+        //
+        // `vidsync.live` dari daftar yang sama TIDAK dipasang: ia menjawab
+        // HTTP 523 (origin tidak terjangkau) untuk kedua judul itu.
+        "vixsrc",
+        { id -> "https://vixsrc.to/movie/$id" },
+        { id, musim, episode -> "https://vixsrc.to/tv/$id/$musim/$episode" },
     ),
     RuteEmbed(
         // Memutar `tmdb 1469930` di Galaxy A36, gagal untuk `tmdb 27205`.

@@ -1125,6 +1125,54 @@ muncul saat diketuk, jeda `paused=true`, lanjut `paused=false`, dan tombol +10
 memberi `maju=10.00`. vidlink dan cinezo tetap berputar, jadi perbaikan ini
 tidak menukar satu pemutar dengan pemutar lain.
 
+### 3ae. Kontrol dipadatkan ke dasar, subtitle mengikuti kotak video
+
+cinesrc memakai skin media-chrome "notflix" yang dirancang untuk pemutar
+setinggi layar: DIUKUR di peramban pada viewport 384x216, bilah waktunya
+`top=86 h=56` dan baris tombolnya `top=140 h=76` — 132 px dari 216 px, dan
+teks durasinya jatuh persis di tengah gambar.
+
+Yang diubah hanya tinggi dan jangkarnya, bukan isinya: bilah dipendekkan ke
+20 px dan 26 px, lalu dipaku ke dasar. Tombol putar yang memang di tengah
+(`notflix-centered-controls`) tidak disentuh.
+
+**Memaku wadahnya ke `100vh` SUDAH DICOBA dan merusak**: terukur di Galaxy
+A36 `kotak=384x160@0,0` dengan layar hitam padahal filmnya berjalan. Wadah
+media-chrome bisa lebih tinggi daripada gambar yang tampil, jadi jangkarnya
+dihitung dari selisih dasar wadah terhadap dasar VIDEO, bukan dari viewport.
+Dipagari bendera kamar `rapikanKontrol`, menyala hanya untuk `cinesrc.st`.
+
+**Letak subtitle tidak boleh pecahan viewport.** `bottom:7%` adalah 15 px pada
+kotak 216 px — tepat di dalam wilayah bilah kontrol — dan ia melenceng tiap
+kali server berganti karena tiap penyedia menaruh videonya pada tinggi yang
+berbeda. Sekarang jaraknya DIUKUR: dasar kotak video terhadap dasar viewport,
+ditambah `RUANG_KONTROL` 34 px, dihitung ulang tiap gambar. Perpindahan server
+tidak perlu penanganan khusus, dan ada batas: cue tidak pernah didorong
+melewati separuh tinggi video.
+
+### 3af. Jembatan TMDB kini bagian dari daemon
+
+Film LK21 baru dulu masuk katalog TANPA TMDB id sampai `tmdb_match.py`
+dijalankan dengan tangan, dan tanpa TMDB id `ServerTambahan.kt` tidak bisa
+menurunkan satu pun dari 16 penyedia embed — judul barunya hanya punya server
+LK21-nya sendiri. Daemon sekarang punya TAHAP 5: match film, match serial,
+panen ketersediaan, bangun `watch_catalog.json`, dan berkas itu ikut
+`BERKAS_TERBIT`.
+
+Tiap langkah BISA DILANJUTKAN, jadi siklus tiga jam hanya menyentuh judul
+baru. Terukur pada jalan pertama: 83 film dan 234 serial baru, dan cakupan
+film naik ke 24.102 dari 25.269 (95,4%).
+
+Langkahnya dijalankan sebagai proses TERPISAH dengan `BATAS_LANGKAH_DETIK`
+3600: tiap skrip punya kunci dan `.env`-nya sendiri, dan satu permintaan yang
+menggantung tidak boleh menahan daemon.
+
+**`tmdb_watch.py` dulu menunjuk berkas di LUAR repo** — `cinevo_clean_catalog.json`
+di `E:\Tools\...`, yang tidak dilacak git dan tidak ada di mesin lain. Daemon
+gagal dengan `FileNotFoundError` dan rantainya putus di situ. Sumbernya
+sekarang daftar kerja keluaran `tmdb_match.py` sendiri (film, serial, anime,
+anime-film), jadi rantainya tertutup.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

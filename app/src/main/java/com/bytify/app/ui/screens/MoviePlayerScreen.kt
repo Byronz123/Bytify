@@ -685,6 +685,63 @@ private const val GATE_BYPASS_JS = """
     return terbaik;
   }
 
+  // ---- Kontrol pemutar DIPADATKAN ke dasar kotak ----
+  //
+  // cinesrc memakai skin media-chrome "notflix" yang dirancang untuk pemutar
+  // setinggi layar: bilah waktunya 56 px dan baris tombolnya 76 px. Di kotak
+  // kita yang hanya 216 px keduanya memakan 132 px — 61% tinggi video — dan
+  // DIUKUR di peramban pada viewport 384x216 bilah waktunya duduk di
+  // `top=86`, yaitu persis di tengah gambar.
+  //
+  // Yang diubah hanya tinggi dan jangkarnya, bukan isinya: keduanya dipaku ke
+  // dasar (`bottom:0` dan `bottom:30px`) dan dipendekkan. Tombol putar yang
+  // memang di tengah (`notflix-centered-controls`) TIDAK disentuh — itu
+  // tempatnya yang benar.
+  // Tinggi bilah DIPENDEKKAN lewat CSS, tetapi JANGKARNYA dihitung dari
+  // kotak VIDEO yang sebenarnya, bukan dari wadah kontrolnya.
+  //
+  // Memaku wadahnya ke `100vh` sudah dicoba dan MERUSAK: terukur di Galaxy
+  // A36 `kotak=384x160@0,0` dengan layar hitam padahal filmnya berjalan.
+  // Wadah media-chrome bisa lebih tinggi daripada gambar yang tampil, jadi
+  // yang dipakai selisih antara dasar wadah dan dasar video.
+  var GAYA_KONTROL =
+    '.notflix-timebar{position:absolute!important;left:0!important;' +
+    'right:0!important;height:20px!important;min-height:0!important;' +
+    'padding:0 56px 0 8px!important;}' +
+    '.notflix-timebar *{max-height:20px!important;}' +
+    '.notflix-controlbar{position:absolute!important;left:0!important;' +
+    'right:0!important;height:26px!important;min-height:0!important;' +
+    'padding:0 8px!important;overflow:hidden!important;}' +
+    '.notflix-controlbar *{max-height:24px!important;}';
+  function rapikanKontrol(){
+    try {
+      if (!BYTIFY_PROFIL.rapikanKontrol) return;
+      var bar = document.querySelector('.notflix-timebar');
+      var tombol = document.querySelector('.notflix-controlbar');
+      if (!bar || !tombol) return;
+      var ada = document.getElementById('bytify-kontrol');
+      if (!ada || !ada.isConnected) {
+        var st = document.createElement('style');
+        st.id = 'bytify-kontrol';
+        st.textContent = GAYA_KONTROL;
+        (document.head || document.documentElement).appendChild(st);
+      }
+      // Dasar gambar: bagian bawah video, diukur relatif terhadap wadah
+      // yang menjangkar kedua bilah.
+      var v = document.querySelector('video');
+      var induk = tombol.offsetParent;
+      var sisa = 0;
+      if (v && induk) {
+        var rv = v.getBoundingClientRect();
+        var ri = induk.getBoundingClientRect();
+        sisa = Math.max(0, Math.round(ri.bottom - rv.bottom));
+      }
+      tombol.style.setProperty('bottom', sisa + 'px', 'important');
+      bar.style.setProperty('bottom', (sisa + 26) + 'px', 'important');
+    } catch (e) {}
+  }
+  setInterval(rapikanKontrol, 700);
+
   function fokusPemutar(){
     try {
       if (!BYTIFY_PROFIL.fokusIframe) return;
@@ -890,7 +947,7 @@ private const val GATE_BYPASS_JS = """
     kotakSub = dokumenSub.createElement('div');
     kotakSub.id = 'bytify-sub';
     kotakSub.style.cssText =
-      'position:fixed;left:0;right:0;bottom:7%;z-index:2147483647;text-align:center;' +
+      'position:fixed;left:0;right:0;bottom:34px;z-index:2147483647;text-align:center;' +
       'pointer-events:none;white-space:pre-line;padding:0 5%;' +
       // Ukuran dikecilkan 4.4vw -> 3.0vw supaya teks tidak menutupi gambar.
       // `clamp` menjaga dua ujungnya: pada kotak pemutar yang sempit (384 px)
@@ -927,6 +984,35 @@ private const val GATE_BYPASS_JS = """
     }
     var k = siapkanKotak();
     if (k.textContent !== teks) k.textContent = teks;
+    aturLetakSub(k, v);
+  }
+  // Letak subtitle MENGIKUTI kotak video server yang sedang dipakai.
+  //
+  // `bottom:7%` adalah pecahan dari TINGGI VIEWPORT, bukan dari videonya, jadi
+  // ia melenceng setiap kali server berganti: tiap penyedia menaruh videonya
+  // pada tinggi yang berbeda, dan bilah durasinya sendiri setinggi 26-30 px.
+  // Akibatnya cue bisa jatuh di atas bilah waktu pada satu server dan
+  // melayang di tengah gambar pada server lain.
+  //
+  // Yang dipakai sekarang jarak DIUKUR: dasar kotak video terhadap dasar
+  // viewport, ditambah ruang tetap untuk bilah kontrol. Dihitung ulang tiap
+  // gambar, jadi perpindahan server tidak perlu penanganan khusus.
+  var RUANG_KONTROL = 34;
+  function aturLetakSub(k, v){
+    try {
+      var tinggi = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (tinggi < 2) return;
+      var r = v.getBoundingClientRect();
+      if (r.height < 2) return;
+      var bawah = Math.max(0, Math.round(tinggi - r.bottom)) + RUANG_KONTROL;
+      // Jangan pernah mendorong teks melewati separuh tinggi video: kalau
+      // kotaknya sangat pendek, lebih baik cue menempel di dasarnya daripada
+      // menutupi wajah di tengah gambar.
+      var batas = Math.round(tinggi - r.top - r.height / 2);
+      if (bawah > batas) bawah = Math.max(0, batas);
+      var nilai = bawah + 'px';
+      if (k.style.bottom !== nilai) k.style.bottom = nilai;
+    } catch (e) {}
   }
   // ---- Trek subtitle MILIK SERVER ----
   //
@@ -1294,6 +1380,13 @@ private data class ProfilServer(
      * sudut.
      */
     val fokusIframe: Boolean = false,
+    /**
+     * Padatkan bilah kontrol pemutar ke dasar kotak.
+     *
+     * Untuk skin yang dirancang bagi pemutar setinggi layar: di kotak 216 px
+     * bilah waktunya jatuh di tengah gambar.
+     */
+    val rapikanKontrol: Boolean = false,
 )
 
 /**
@@ -1343,7 +1436,7 @@ private val PROFIL: List<Pair<String, ProfilServer>> = listOf(
 
     // Pemutar yang baru membuat sumbernya SETELAH ada gestur.
     "vidlink.pro" to ProfilServer(jedaKetukMs = 6000L),
-    "cinesrc.st" to ProfilServer(jedaKetukMs = 6000L),
+    "cinesrc.st" to ProfilServer(jedaKetukMs = 6000L, rapikanKontrol = true),
     "vidcore.io" to ProfilServer(jedaKetukMs = 6000L),
     // vixsrc: pemutar langsung dari daftar novashow (`server=autoembed`).
     "vixsrc.to" to ProfilServer(jedaKetukMs = 6000L),
@@ -1366,7 +1459,8 @@ private fun skripUntuk(profil: ProfilServer): String = GATE_BYPASS_JS.replace(
     "{jepit:${profil.jepitWadah}," +
         "paksaTerlihat:${profil.paksaTerlihat}," +
         "lewatiPanduan:${profil.lewatiPanduan}," +
-        "fokusIframe:${profil.fokusIframe}}",
+        "fokusIframe:${profil.fokusIframe}," +
+        "rapikanKontrol:${profil.rapikanKontrol}}",
 )
 
 private fun profilUntuk(url: String?): ProfilServer {

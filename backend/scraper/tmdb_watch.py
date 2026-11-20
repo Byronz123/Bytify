@@ -46,10 +46,22 @@ DIR_DATA = os.path.join(DIR, "..", "data")
 KELUARAN = os.path.join(DIR_DATA, "watch_database.json")
 
 #: Daftar kerja: himpunan (type, tmdbId) yang mau dipanen.
-SUMBER_DAFTAR = os.environ.get(
-    "BYTIFY_DAFTAR_TMDB",
-    os.path.join("E:", os.sep, "Tools", "Scraper Cloudflare", "cinevo-scraper",
-                 "scraped_output", "cinevo_clean_catalog.json"))
+#: Daftar kerja bawaan: berkas yang DIHASILKAN `tmdb_match.py` sendiri.
+#:
+#: Dulu bawaannya menunjuk `cinevo_clean_catalog.json` di luar repo. Itu
+#: membuat seluruh lapisan ketersediaan bergantung pada berkas yang tidak
+#: dilacak git dan tidak ada di mesin lain — daemon gagal dengan
+#: `FileNotFoundError` dan film baru tidak pernah dapat TMDB id. Sumbernya
+#: sekarang keluaran jembatan kita sendiri, jadi rantainya tertutup:
+#: match -> daftar kerja -> panen ketersediaan -> katalog terbit.
+_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+DAFTAR_BAWAAN = [
+    os.path.join(_DATA, "tmdb_match_worklist.json"),
+    os.path.join(_DATA, "series_match_worklist.json"),
+    os.path.join(_DATA, "anime_match_worklist.json"),
+    os.path.join(_DATA, "anime_movie_worklist.json"),
+]
+SUMBER_DAFTAR = os.environ.get("BYTIFY_DAFTAR_TMDB", "")
 
 WILAYAH = "ID"
 UTAS = 16
@@ -170,12 +182,22 @@ def muat_daftar_kerja():
 
     Keduanya diterima; bentuknya dikenali dari isi berkas.
     """
-    with open(SUMBER_DAFTAR, encoding="utf-8") as f:
-        mentah = json.load(f)
+    sumber = [SUMBER_DAFTAR] if SUMBER_DAFTAR else [
+        j for j in DAFTAR_BAWAAN if os.path.exists(j)
+    ]
+    if not sumber:
+        raise SystemExit(
+            "Tidak ada daftar kerja. Jalankan tmdb_match.py lebih dulu.")
 
-    baris = mentah.get("movies") if isinstance(mentah, dict) else mentah
-    if not isinstance(baris, list):
-        raise SystemExit("Bentuk daftar kerja tidak dikenali: " + SUMBER_DAFTAR)
+    baris = []
+    for jalur in sumber:
+        with open(jalur, encoding="utf-8") as f:
+            mentah = json.load(f)
+        bagian = mentah.get("movies") if isinstance(mentah, dict) else mentah
+        if not isinstance(bagian, list):
+            raise SystemExit("Bentuk daftar kerja tidak dikenali: " + jalur)
+        baris.extend(bagian)
+        print("  daftar kerja: %-28s %d baris" % (os.path.basename(jalur), len(bagian)))
 
     kerja, lihat = [], set()
     for d in baris:

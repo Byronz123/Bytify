@@ -3,6 +3,7 @@
 # ==========================================
 import os
 import subprocess
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -26,7 +27,28 @@ BERKAS_TERBIT = [
     "backend/data/catalog.json",
     "backend/data/series_catalog.json",
     "backend/data/live_tv_database.json",
+    # Lapisan ketersediaan + alias TMDB. Tanpa berkas ini film LK21 yang baru
+    # masuk tidak punya TMDB id, dan tanpa TMDB id `ServerTambahan.kt` tidak
+    # bisa menurunkan satu pun dari 16 penyedia embed — judul barunya hanya
+    # punya server LK21-nya sendiri.
+    "backend/data/watch_catalog.json",
 ]
+
+# Langkah jembatan TMDB, dijalankan berurutan. Masing-masing BISA DILANJUTKAN:
+# `tmdb_match.py` hanya mengerjakan judul yang belum pernah diputuskan, dan
+# `tmdb_watch.py` hanya id yang belum dipanen. Jadi siklus tiga jam berikutnya
+# hanya menyentuh judul yang benar-benar baru, bukan mengulang 25 ribu film.
+LANGKAH_TMDB = [
+    ("mencocokkan film baru ke TMDB id", ["tmdb_match.py"]),
+    ("mencocokkan serial baru ke TMDB id", ["tmdb_match.py", "--serial"]),
+    ("memanen ketersediaan resmi", ["tmdb_watch.py"]),
+    ("membangun watch_catalog.json", ["build_watch_catalog.py"]),
+]
+
+#: Batas waktu per langkah. Daemon tidak boleh tergantung pada satu permintaan
+#: jaringan yang menggantung; langkah yang lewat batas dipotong dan siklus
+#: berikutnya melanjutkannya dari tempatnya berhenti.
+BATAS_LANGKAH_DETIK = 3600
 
 
 def _git(*args, timeout=300):
@@ -73,6 +95,38 @@ def terbitkan_katalog():
 
     print("[+] Katalog diterbitkan ke GitHub — deploy ke Cloudflare akan berjalan sendiri.")
 
+def jembatani_tmdb():
+    """
+    Isi `watch_aliases` untuk judul yang baru masuk katalog.
+
+    Dijalankan sebagai proses TERPISAH, bukan diimpor: tiap skrip punya
+    kuncinya sendiri, memakai utas sendiri, dan membaca `.env`-nya sendiri.
+    Kegagalan satu langkah tidak boleh menjatuhkan daemon, jadi hasilnya
+    dilaporkan lalu siklus lanjut — langkah yang sama akan dicoba lagi tiga
+    jam kemudian, melanjutkan dari tempatnya berhenti.
+    """
+    skrip_dir = Path(__file__).resolve().parent
+    for nama, perintah in LANGKAH_TMDB:
+        print(f"  - {nama}...")
+        try:
+            hasil = subprocess.run(
+                [sys.executable, "-I", *perintah],
+                cwd=skrip_dir,
+                capture_output=True,
+                text=True,
+                timeout=BATAS_LANGKAH_DETIK,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"    [!] lewat batas {BATAS_LANGKAH_DETIK}s; dilanjutkan siklus berikutnya")
+            continue
+        baris = [b for b in (hasil.stdout or "").strip().splitlines() if b.strip()]
+        for b in baris[-3:]:
+            print("    " + b)
+        if hasil.returncode != 0:
+            galat = (hasil.stderr or "").strip().splitlines()
+            print(f"    [!] gagal (kode {hasil.returncode}): {galat[-1] if galat else 'tanpa pesan'}")
+
+
 def run_full_sync_cycle():
     print("\n" + "=" * 65)
     print(f"[*] [{time.strftime('%Y-%m-%d %H:%M:%S')}] MEMULAI SIKLUS AUTO-SYNC BYTIFY")
@@ -80,7 +134,7 @@ def run_full_sync_cycle():
 
     # 1. Auto-Crawl Film Baru
     try:
-        print("\n[TAHAP 1/5] Memindai Katalog Film Terbaru...")
+        print("\n[TAHAP 1/6] Memindai Katalog Film Terbaru...")
         crawl_massive_catalog_parallel(DEFAULT_MOVIE_DOMAIN)
     except Exception as e:
         print(f"[!] Error pada Tahap 1 (Crawler): {e}")
@@ -88,7 +142,7 @@ def run_full_sync_cycle():
 
     # 2. Auto-Build Database Film Baru (Hanya memproses URL yang belum ada di JSON)
     try:
-        print("\n[TAHAP 2/5] Mengekstrak Metadata, Poster, ND_URL & Stream Film Baru...")
+        print("\n[TAHAP 2/6] Mengekstrak Metadata, Poster, ND_URL & Stream Film Baru...")
         build_database()
     except Exception as e:
         print(f"[!] Error pada Tahap 2 (Build Database): {e}")
@@ -96,7 +150,7 @@ def run_full_sync_cycle():
 
     # 3. Auto-Scrape Saluran Live TV dari TV Garden
     try:
-        print("\n[TAHAP 3/5] Memperbarui Saluran Live TV dari TV Garden...")
+        print("\n[TAHAP 3/6] Memperbarui Saluran Live TV dari TV Garden...")
         build_live_tv_database()
     except Exception as e:
         print(f"[!] Error pada Tahap 3 (TV Garden Scraper): {e}")
@@ -106,20 +160,29 @@ def run_full_sync_cycle():
     #    Serial "Complete" tidak pernah bertambah episodenya, jadi memanennya
     #    tiap tiga jam hanya membuang puluhan ribu permintaan.
     try:
-        print("\n[TAHAP 4/5] Menyegarkan serial baru & yang masih tayang...")
+        print("\n[TAHAP 4/6] Menyegarkan serial baru & yang masih tayang...")
         segarkan_serial()
         bangun_katalog_serial()
     except Exception as e:
         print(f"[!] Error pada Tahap 4 (Serial): {e}")
         traceback.print_exc()
 
-    # 5. Terbitkan: tanpa tahap ini katalog hanya berubah di komputer dan
+    # 5. Jembatan TMDB: tanpa tahap ini film baru masuk katalog TANPA TMDB id,
+    #    sehingga server turunan dan subtitle tidak bisa dibentuk untuknya.
+    try:
+        print("\n[TAHAP 5/6] Menjembatani judul baru ke TMDB id...")
+        jembatani_tmdb()
+    except Exception as e:
+        print(f"[!] Error pada Tahap 5 (Jembatan TMDB): {e}")
+        traceback.print_exc()
+
+    # 6. Terbitkan: tanpa tahap ini katalog hanya berubah di komputer dan
     #    tidak pernah sampai ke pengguna.
     try:
-        print("\n[TAHAP 5/5] Menerbitkan katalog ke GitHub...")
+        print("\n[TAHAP 6/6] Menerbitkan katalog ke GitHub...")
         terbitkan_katalog()
     except Exception as e:
-        print(f"[!] Error pada Tahap 5 (Terbit): {e}")
+        print(f"[!] Error pada Tahap 6 (Terbit): {e}")
         traceback.print_exc()
 
     print("\n" + "=" * 65)

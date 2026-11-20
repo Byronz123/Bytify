@@ -989,6 +989,34 @@ sudah menyatakannya. Sebelum ini, chip yang ditekan melaporkan host server LAIN
 karena watchdog sudah memindahkannya sebelum server itu sempat menempelkan
 sumbernya.
 
+### 3z. Situs pembungkus: tampilkan PEMUTARNYA, jangan tebak iklannya
+
+holaflix berjalan sejak awal, tetapi yang TERLIHAT bukan filmnya: kepala
+halaman berlogo dan spanduk "UP TO 90% OFF" menutupi separuh layar, sementara
+kotak pemutarnya tinggal `350x197` terdesak ke sudut.
+
+Cara yang TIDAK dipakai: `EMBED_CLEANUP_JS`. Ia menebak mana iklan dengan
+membuang elemen ber-class `overlay`/`popup`/`banner` — justru nama yang dipakai
+pemutar modern untuk kontrolnya sendiri, dan itu sudah pernah merusak pemutar
+yang sehat (3n).
+
+Yang dipakai kebalikannya: tentukan mana PEMUTARNYA, lalu sembunyikan semua
+yang bukan leluhur maupun keturunannya, dan paku iframe itu memenuhi viewport.
+Iklan tidak perlu dikenali sama sekali — apa pun bentuknya, ia bukan jalur
+menuju pemutar, jadi ia hilang.
+
+Pemilihan iframe-nya: `src` yang mengandung nama pemutar yang dikenal
+(cinezo, cinesrc, vidlink, vidzee, vidsrc, vsembed, embed, player, stream)
+diutamakan; kalau tidak ada yang dikenal, yang paling luas.
+
+Dipagari bendera kamar `fokusIframe`, dan HANYA dinyalakan untuk host yang
+memang berupa SITUS: `holaflix.cc` dan `novashow.live`. Penyedia yang sudah
+berupa pemutar tidak tersentuh.
+
+Terukur di Galaxy A36 sesudahnya: kotak `350x197` -> `384x216@0,0`, iklan dan
+kepala halaman hilang, dan ketiga film uji tetap berjalan
+(`t=37.10 / 36.24 / 36.80`, semuanya `rs=4`, host `player.cinezo.live`).
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

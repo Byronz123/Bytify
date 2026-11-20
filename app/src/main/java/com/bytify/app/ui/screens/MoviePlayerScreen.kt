@@ -620,6 +620,80 @@ private const val GATE_BYPASS_JS = """
   }
   setInterval(jagaTerlihat, 1000);
 
+  // ---- Situs pembungkus: tampilkan PEMUTARNYA saja ----
+  //
+  // Halaman seperti holaflix bukan pemutar, melainkan situs lengkap: ada
+  // kepala halaman, logo, dan spanduk iklan. Terukur di Galaxy A36, iklan
+  // "UP TO 90% OFF" menutupi separuh layar sementara kotak pemutarnya tinggal
+  // sepertiga lebar — filmnya berjalan, tetapi yang terlihat iklan.
+  //
+  // EMBED_CLEANUP_JS tidak dipakai di sini: ia membuang elemen ber-class
+  // "overlay"/"popup"/"banner", justru nama yang dipakai pemutar modern untuk
+  // kontrolnya sendiri (3n). Yang dilakukan di sini kebalikannya — alih-alih
+  // menebak mana iklan, kita menentukan mana PEMUTARNYA lalu menyembunyikan
+  // yang bukan leluhur maupun keturunannya. Iklan tidak perlu dikenali.
+  var PEMUTAR_DIKENAL = ['cinezo', 'cinesrc', 'vidlink', 'vidzee', 'vidsrc',
+                         'vsembed', 'embed', 'player', 'stream'];
+  function iframePemutar(){
+    var fr = [].slice.call(document.querySelectorAll('iframe'));
+    var terbaik = null, luasTerbaik = 0;
+    for (var i = 0; i < fr.length; i++) {
+      var src = (fr[i].src || '').toLowerCase();
+      if (!src || src.indexOf('http') !== 0) continue;
+      var luas = fr[i].offsetWidth * fr[i].offsetHeight;
+      var kenal = false;
+      for (var j = 0; j < PEMUTAR_DIKENAL.length; j++) {
+        if (src.indexOf(PEMUTAR_DIKENAL[j]) >= 0) { kenal = true; break; }
+      }
+      // Yang dikenal diutamakan; kalau tidak ada, yang paling luas.
+      var nilai = luas + (kenal ? 1e9 : 0);
+      if (nilai > luasTerbaik) { luasTerbaik = nilai; terbaik = fr[i]; }
+    }
+    return terbaik;
+  }
+
+  function fokusPemutar(){
+    try {
+      if (!BYTIFY_PROFIL.fokusIframe) return;
+      var h = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (h < 2) return;
+      var f = iframePemutar();
+      if (!f) return;
+      // Sembunyikan yang BUKAN jalur menuju pemutar.
+      var jalur = [];
+      var n = f;
+      while (n && n !== document.body) { jalur.push(n); n = n.parentElement; }
+      var simpul = document.body ? document.body.children : [];
+      for (var i = 0; i < simpul.length; i++) {
+        var el = simpul[i];
+        var ikut = false;
+        for (var j = 0; j < jalur.length; j++) {
+          if (el === jalur[j] || el.contains(f)) { ikut = true; break; }
+        }
+        if (!ikut && el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+          el.style.setProperty('display', 'none', 'important');
+        }
+      }
+      for (var k = 0; k < jalur.length; k++) {
+        jalur[k].style.setProperty('margin', '0', 'important');
+        jalur[k].style.setProperty('padding', '0', 'important');
+        jalur[k].style.setProperty('max-width', 'none', 'important');
+      }
+      if (document.body) {
+        document.body.style.setProperty('margin', '0', 'important');
+        document.body.style.setProperty('background', '#000', 'important');
+      }
+      f.style.setProperty('position', 'fixed', 'important');
+      f.style.setProperty('top', '0', 'important');
+      f.style.setProperty('left', '0', 'important');
+      f.style.setProperty('width', '100vw', 'important');
+      f.style.setProperty('height', h + 'px', 'important');
+      f.style.setProperty('border', '0', 'important');
+      f.style.setProperty('z-index', '2147483646', 'important');
+    } catch (e) {}
+  }
+  setInterval(fokusPemutar, 700);
+
   setInterval(pastikanTinggi, 400);
   window.addEventListener('resize', pastikanTinggi);
 
@@ -1088,6 +1162,14 @@ private data class ProfilServer(
     val lewatiPanduan: Boolean = false,
     /** Ambang watchdog sebelum ada tanda kemajuan apa pun. */
     val ambangMs: Long = BATAS_KETUK_MS,
+    /**
+     * Tampilkan HANYA iframe pemutarnya, sembunyikan sisa halaman.
+     *
+     * Untuk host yang berupa SITUS, bukan pemutar: tanpa ini yang terlihat
+     * kepala halaman dan spanduk iklannya, sementara filmnya terdesak ke
+     * sudut.
+     */
+    val fokusIframe: Boolean = false,
 )
 
 /**
@@ -1128,8 +1210,12 @@ private val PROFIL: List<Pair<String, ProfilServer>> = listOf(
     // dalam iframe, jadi jangan diketuk cepat-cepat (ketukan di situs induk
     // menekan tombolnya sendiri, bukan tombol pemutarnya) dan beri waktu lebih
     // karena ada satu lapisan jaringan tambahan.
-    "holaflix.cc" to ProfilServer(jedaKetukMs = 9000L, ambangMs = 45_000L),
-    "novashow.live" to ProfilServer(jedaKetukMs = 9000L, ambangMs = 45_000L),
+    "holaflix.cc" to ProfilServer(
+        jedaKetukMs = 9000L, ambangMs = 45_000L, fokusIframe = true,
+    ),
+    "novashow.live" to ProfilServer(
+        jedaKetukMs = 9000L, ambangMs = 45_000L, fokusIframe = true,
+    ),
 
     // Pemutar yang baru membuat sumbernya SETELAH ada gestur.
     "vidlink.pro" to ProfilServer(jedaKetukMs = 6000L),
@@ -1149,7 +1235,8 @@ private fun skripUntuk(profil: ProfilServer): String = GATE_BYPASS_JS.replace(
     "__PROFIL__",
     "{jepit:${profil.jepitWadah}," +
         "paksaTerlihat:${profil.paksaTerlihat}," +
-        "lewatiPanduan:${profil.lewatiPanduan}}",
+        "lewatiPanduan:${profil.lewatiPanduan}," +
+        "fokusIframe:${profil.fokusIframe}}",
 )
 
 private fun profilUntuk(url: String?): ProfilServer {

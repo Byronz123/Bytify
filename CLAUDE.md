@@ -1017,6 +1017,34 @@ Terukur di Galaxy A36 sesudahnya: kotak `350x197` -> `384x216@0,0`, iklan dan
 kepala halaman hilang, dan ketiga film uji tetap berjalan
 (`t=37.10 / 36.24 / 36.80`, semuanya `rs=4`, host `player.cinezo.live`).
 
+### 3aa. Halaman BLOKIR, dan kapan pilihan manual boleh dilanggar
+
+veloflix/zxcstream menolak sebagian judul dengan halaman "VPN Detected — Your
+VPN or proxy IP address is currently blocked due to abuse." Itu penyedianya
+yang memblokir alamat IP penonton, bukan kesalahan pemutar kita.
+
+**Memalsukan identitas untuk menembusnya TIDAK dilakukan** — itu mengakali
+perlindungan mereka sendiri. Yang dilakukan dua hal yang sah:
+
+1. Menekan tombol "Try Again" yang halaman itu sediakan sendiri, paling
+   banyak dua kali. Blokirnya memang sering sementara: judul lain di server
+   yang sama berjalan normal dari jaringan yang sama. Tombol itu berpendingin
+   ("Try Again (8s)"), jadi percobaannya dijarakkan 6/12/18/24 detik.
+2. Kalau tetap ditolak, melaporkannya `BYTIFY_GAGAL` supaya pemutar berpindah
+   — bukan menonton layar blokir sampai ambang waktu habis.
+
+**Penolakan TEGAS mengalahkan pilihan manual, dan itu perbedaan yang penting.**
+Pilihan manual mematikan perpindahan otomatis (karena penelusuran otomatis ada
+untuk saat pengguna belum menyatakan apa pun). Tetapi ambang waktu hanya
+berarti "belum berputar", sedangkan halaman yang menyatakan tidak punya sumber
+atau memblokir IP sudah MENJAWAB. Menahan penonton di jawaban itu demi
+menghormati pilihannya bukan menghormati. Karena itu `tolakanTegas` boleh
+memindahkan server sekali, lalu dipadamkan lagi.
+
+Terukur di Galaxy A36 pada Interstellar: veloflix memberi halaman blokir, dua
+kali "Try Again" gagal, lalu pemutar berpindah dan cinesrc memutarnya —
+`t=11.10 rs=4 buf=114.7 kotak=384x216@0,0`.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

@@ -85,3 +85,10 @@ backend/api/dist-uji/
 backend/data/anikai_database.json
 backend/data/anikai_database.json.tmp
 backend/data/anikai_servers.lock
+
+# Dataset IMDb (title.basics 220 MB, title.akas 500 MB) dipakai
+# `imdb_bridge.py` untuk menjembatani judul yang TMDB sendiri tidak bisa
+# cocokkan. Hasilnya ikut terbit di watch_catalog.json, jadi berkas mentahnya
+# tidak perlu dilacak — dan memang tidak boleh: ukurannya jauh melewati batas
+# wajar sebuah repositori.
+backend/data/imdb/

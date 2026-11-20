@@ -207,6 +207,52 @@ def cari_tmdb(kueri):
     return []
 
 
+_runtime_singgahan = {}
+
+
+def runtime_tmdb(tid):
+    """
+    Durasi menit menurut TMDB untuk satu id, atau None.
+
+    Hasil pencarian TMDB TIDAK membawa runtime, jadi ini permintaan terpisah.
+    Hanya dipanggil untuk kandidat yang SUDAH lolos judul+tahun, jadi jumlahnya
+    kecil: hanya judul yang ambigu yang sampai ke sini.
+    """
+    if tid in _runtime_singgahan:
+        return _runtime_singgahan[tid]
+    nilai = None
+    q = urllib.parse.urlencode({"api_key": KEY})
+    url = f"https://api.themoviedb.org/3/{AKTIF['type']}/{tid}?{q}"
+    for coba in range(4):
+        try:
+            r = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(r, timeout=25) as resp:
+                d = json.loads(resp.read()) or {}
+            rt = d.get("runtime")
+            if isinstance(rt, int) and rt > 0:
+                nilai = rt
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                time.sleep(float(e.headers.get("Retry-After") or 2) + coba)
+                continue
+            break
+        except Exception:
+            time.sleep(1 + coba)
+    with _kunci:
+        _runtime_singgahan[tid] = nilai
+    return nilai
+
+
+#: Selisih durasi yang masih dianggap judul yang sama, dalam menit.
+#:
+#: Diukur pada 19 judul LK21 yang sudah PASTI tercocokkan: selisih terhadap
+#: runtime TMDB paling besar 2 menit, mediannya 0. Jadi 3 menit sudah longgar.
+#: Angka ini BUKAN pelonggaran aturan judul+tahun — ia hanya memutuskan di
+#: antara kandidat yang semuanya sudah lolos aturan itu.
+TOLERANSI_DURASI = 3
+
+
 def tahun_dari(hasil):
     m = re.match(r"^(\d{4})", str(hasil.get(AKTIF["tanggal"]) or ""))
     return int(m.group(1)) if m else None
@@ -285,6 +331,36 @@ def cocokkan(film):
 
         gabung = {**lewat_asli, **lewat_judul}
         if len(gabung) > 1:
+            # DURASI sebagai pemutus terakhir, dan hanya untuk film.
+            #
+            # Kandidat di sini sudah sama-sama lolos "judul ternormalkan sama
+            # persis + tahun ±1", jadi yang ditambahkan bukti BARU, bukan
+            # kelonggaran. Durasi katalog LK21 terbukti akurat: pada 19 judul
+            # yang sudah pasti cocok, selisihnya terhadap runtime TMDB paling
+            # besar 2 menit.
+            #
+            # Tetap konservatif: kalau yang masuk toleransi bukan tepat SATU,
+            # judulnya tetap dilewati sebagai ambigu.
+            durasi = film.get("durationMin")
+            if AKTIF["type"] == "movie" and isinstance(durasi, int) and durasi > 0:
+                dekat = []
+                for tid, h in list(gabung.items())[:6]:
+                    rt = runtime_tmdb(tid)
+                    if rt is not None and abs(rt - durasi) <= TOLERANSI_DURASI:
+                        dekat.append((tid, h, rt))
+                if len(dekat) == 1:
+                    tid, h, rt = dekat[0]
+                    return "cocok", {
+                        "tmdbId": tid,
+                        "type": AKTIF["type"],
+                        "via": kueri,
+                        "lewat": "durasi",
+                        "tmdbTitle": judul_hasil(h)[0],
+                        "tmdbYear": tahun_dari(h),
+                        "tahunKatalog": tahun,
+                        "durasiKatalog": durasi,
+                        "durasiTmdb": rt,
+                    }
             return "ambigu", {
                 "kueri": kueri,
                 "kandidat": [

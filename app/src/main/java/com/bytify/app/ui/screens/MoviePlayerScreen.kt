@@ -736,6 +736,43 @@ private const val GATE_BYPASS_JS = """
   setInterval(lewatiPanduan, 900);
 
   var lapornyaGagal = false;
+  // ---- Halaman "VPN Detected": pakai tombolnya, lalu menyerah ----
+  //
+  // Terukur di Galaxy A36 pada veloflix/zxcstream untuk Interstellar:
+  // "VPN Detected — Your VPN or proxy IP address is currently blocked due to
+  // abuse." Itu penyedianya yang MEMBLOKIR alamat IP jaringan penonton, bukan
+  // kesalahan pemutar kita, dan memalsukan identitas untuk menembusnya berarti
+  // mengakali perlindungan mereka sendiri — tidak dilakukan.
+  //
+  // Yang dilakukan dua hal yang sah: menekan tombol "Try Again" yang halaman
+  // itu sediakan sendiri (blokirnya sering sementara; judul lain di server
+  // yang sama berjalan normal dari jaringan yang sama), dan kalau sesudah dua
+  // kali tetap ditolak, melaporkannya sebagai GAGAL supaya pemutar berpindah
+  // ke server berikutnya alih-alih menonton layar blokir sampai ambang habis.
+  var cobaBlokir = 0;
+  var POLA_BLOKIR = /vpn detected|proxy ip address|blocked due to abuse|access denied from your|region[- ]locked/i;
+  function tanganiBlokir(){
+    try {
+      if (lapornyaGagal) return;
+      var t = (document.body ? document.body.innerText : '') || '';
+      if (t.length > 3000 || !POLA_BLOKIR.test(t)) return;
+      if (cobaBlokir < 2) {
+        cobaBlokir++;
+        var tb = [].slice.call(document.querySelectorAll('button,a,div[role=button]'));
+        for (var i = 0; i < tb.length; i++) {
+          if (/try again|coba lagi|retry|reload/i.test((tb[i].textContent || '').trim())) {
+            tb[i].click();
+            return;
+          }
+        }
+        return;
+      }
+      lapornyaGagal = true;
+      console.log('BYTIFY_GAGAL');
+    } catch (e) {}
+  }
+  [6000, 12000, 18000, 24000].forEach(function(ms){ setTimeout(tanganiBlokir, ms); });
+
   function cekSumberMandek(){
     try {
       if (lapornyaGagal) return;
@@ -1110,14 +1147,63 @@ private const val SUNTIK_LUAR_JS = """
       try {
         var h = window.innerHeight || document.documentElement.clientHeight || 0;
         if (h > 2) {
+          // Pilih iframe PEMUTARNYA, lalu sembunyikan yang bukan jalur
+          // menuju ke sana.
+          //
+          // Dokumen utama veloflix sengaja TIDAK diproksikan (sesinya rusak
+          // tanpa cookie), jadi GATE_BYPASS_JS — berikut pemfokus iframe di
+          // dalamnya — tidak pernah masuk ke halaman itu. Akibatnya kepala
+          // halaman, panduan, dan iklannya tetap menutupi pemutar, dan yang
+          // terlihat layar hitam meski filmnya berjalan.
+          var kenal = ['zxcstream', 'cinezo', 'cinesrc', 'vidlink', 'vidzee',
+                       'vidsrc', 'embed', 'player', 'stream'];
           var fr = document.querySelectorAll('iframe');
+          var pilih = null, nilaiTerbaik = -1;
           for (var i = 0; i < fr.length; i++) {
-            if (fr[i].offsetWidth > 2 && fr[i].offsetHeight < h - 2) {
-              fr[i].style.height = h + 'px';
-              fr[i].style.minHeight = h + 'px';
+            var src = (fr[i].src || '').toLowerCase();
+            if (src.indexOf('http') !== 0) continue;
+            var cocok = 0;
+            for (var k = 0; k < kenal.length; k++) {
+              if (src.indexOf(kenal[k]) >= 0) { cocok = 1; break; }
+            }
+            var nilai = fr[i].offsetWidth * fr[i].offsetHeight + cocok * 1e9;
+            if (nilai > nilaiTerbaik) { nilaiTerbaik = nilai; pilih = fr[i]; }
+          }
+          if (pilih) {
+            var jalur = [], n = pilih;
+            while (n && n !== document.body) { jalur.push(n); n = n.parentElement; }
+            var anak = document.body ? document.body.children : [];
+            for (var j = 0; j < anak.length; j++) {
+              var el = anak[j];
+              if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+              if (!el.contains(pilih)) {
+                el.style.setProperty('display', 'none', 'important');
+              }
+            }
+            for (var m = 0; m < jalur.length; m++) {
+              jalur[m].style.setProperty('margin', '0', 'important');
+              jalur[m].style.setProperty('padding', '0', 'important');
+              jalur[m].style.setProperty('max-width', 'none', 'important');
+            }
+            pilih.style.setProperty('position', 'fixed', 'important');
+            pilih.style.setProperty('top', '0', 'important');
+            pilih.style.setProperty('left', '0', 'important');
+            pilih.style.setProperty('width', '100vw', 'important');
+            pilih.style.setProperty('height', h + 'px', 'important');
+            pilih.style.setProperty('border', '0', 'important');
+            pilih.style.setProperty('z-index', '2147483646', 'important');
+          } else {
+            for (var q = 0; q < fr.length; q++) {
+              if (fr[q].offsetWidth > 2 && fr[q].offsetHeight < h - 2) {
+                fr[q].style.height = h + 'px';
+                fr[q].style.minHeight = h + 'px';
+              }
             }
           }
-          if (document.body) document.body.style.margin = '0';
+          if (document.body) {
+            document.body.style.setProperty('margin', '0', 'important');
+            document.body.style.setProperty('background', '#000', 'important');
+          }
         }
         if (/veloflix/i.test(location.hostname)) {
           var tb = [].slice.call(document.querySelectorAll('button'));
@@ -1587,6 +1673,17 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     var sudahDilewati by remember(playKey) { mutableStateOf<String?>(null) }
     /** Pengguna memilih servernya sendiri; jangan dipindahkan otomatis. */
     var pilihanManual by remember(playKey, videoUrl) { mutableStateOf(false) }
+    /**
+     * Penolakan TEGAS dari penyedianya; boleh memindahkan server meski
+     * pilihannya manual.
+     *
+     * Bedanya dengan ambang waktu penting: ambang waktu hanya berarti "belum
+     * berputar", sedangkan halaman yang menyatakan tidak punya sumber atau
+     * memblokir alamat IP sudah MENJAWAB. Menahan penonton di jawaban itu
+     * demi menghormati pilihannya bukan menghormati, melainkan membiarkannya
+     * menatap layar blokir.
+     */
+    var tolakanTegas by remember(playKey, videoUrl) { mutableStateOf(false) }
 
     // --- Jalur UJI: memilih server lewat siaran, hanya di build debug ---
     //
@@ -1655,9 +1752,10 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // keduanya tiba sebelum recomposition, sehingga penjaga
         // `dariUrl == activeEmbedUrl` saja masih meloloskan keduanya dan dua
         // server terlompati dalam 11 ms.
-        if (pilihanManual) {
+        if (pilihanManual && !tolakanTegas) {
             Log.i(EMBED_TAG, "server dipilih manual; perpindahan otomatis dilewati")
         } else if ((dariUrl == null || dariUrl == activeEmbedUrl) && dariUrl != sudahDilewati) {
+            tolakanTegas = false
             sudahDilewati = dariUrl
             if (indeksServer + 1 < kandidat.size) indeksServer += 1 else serverHabis = true
         }
@@ -1879,6 +1977,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
                     onTrek = { trekServer = it },
+                    onTolakTegas = { tolakanTegas = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1909,6 +2008,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
                     onTrek = { trekServer = it },
+                    onTolakTegas = { tolakanTegas = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -1955,6 +2055,7 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                     onSiap = { serverSiap = true },
                     onKemajuan = { serverKemajuan = true },
                     onTrek = { trekServer = it },
+                    onTolakTegas = { tolakanTegas = true },
                     onWebView = { webEmbed = it },
                 )
             }
@@ -2166,6 +2267,8 @@ private fun EmbedVideoStage(
     onKemajuan: () -> Unit = {},
     /** Trek subtitle yang dibawa server ini sendiri. */
     onTrek: (List<TrekServer>) -> Unit = {},
+    /** Penyedianya MENJAWAB tidak bisa; boleh pindah meski pilihannya manual. */
+    onTolakTegas: () -> Unit = {},
 ) {
     // Player embed (videonode dan sejenisnya) menolak permintaan tanpa Referer
     // dan mengalihkannya ke beranda situs sumber. Kirim halaman film sebagai
@@ -2349,6 +2452,7 @@ private fun EmbedVideoStage(
                                 // berikutnya.
                                 if (!sudahMain.get()) {
                                     Log.w(EMBED_TAG, "player melapor tanpa sumber: $videoUrl")
+                                    onTolakTegas()
                                     onGagal(videoUrl)
                                 }
                             } else {

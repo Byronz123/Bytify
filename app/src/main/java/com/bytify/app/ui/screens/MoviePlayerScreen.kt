@@ -892,12 +892,12 @@ private const val GATE_BYPASS_JS = """
     kotakSub.style.cssText =
       'position:fixed;left:0;right:0;bottom:7%;z-index:2147483647;text-align:center;' +
       'pointer-events:none;white-space:pre-line;padding:0 5%;' +
-      // Ukuran dikecilkan 4.4vw -> 3.6vw supaya teks tidak menutupi gambar.
+      // Ukuran dikecilkan 4.4vw -> 3.0vw supaya teks tidak menutupi gambar.
       // `clamp` menjaga dua ujungnya: pada kotak pemutar yang sempit (384 px)
-      // 3.6vw hanya 13,8 px, dan tanpa batas bawah teksnya tidak terbaca;
+      // 3.0vw hanya 11,5 px, dan tanpa batas bawah teksnya tidak terbaca;
       // pada layar penuh lanskap vw jauh lebih besar, dan tanpa batas atas
       // satu baris panjang bisa memakan separuh gambar.
-      'font:600 clamp(13px,3.6vw,30px)/1.35 system-ui,-apple-system,Roboto,sans-serif;color:#fff;' +
+      'font:600 clamp(11px,3.0vw,24px)/1.3 system-ui,-apple-system,Roboto,sans-serif;color:#fff;' +
       'text-shadow:0 2px 4px #000,0 0 10px #000,0 0 3px #000;';
     (dokumenSub.body || dokumenSub.documentElement).appendChild(kotakSub);
     return kotakSub;

@@ -921,6 +921,74 @@ verifikasi email. Sesudah diisi, ingat jebakan yang sudah tercatat —
 mengubah environment variable di Cloudflare TIDAK berlaku untuk deployment
 yang sudah ada, jadi harus ada deploy baru.
 
+### 3y. Enam penyedia baru, dan cara mengujinya yang akhirnya sahih
+
+**Enam situs yang diminta ternyata sebagian KULIT.** Ditelusuri satu per satu:
+
+| situs | temuan |
+|---|---|
+| reelix.ac | siput berkode (`/movie/ghost-soldier-YxXyJhm5861P`); pemutarnya `vidcore.io` yang sudah kita punya. Mode Embed-nya membuka `vsembed.su` dan `multiembed.mov` |
+| holaflix.cc | `/play/movie/<tmdbId>` — TMDB id LANGSUNG, dan membawa 14 penyedia |
+| flixfix.fun | `/movie/<tmdbId>` ada, tetapi halaman tontonnya tidak menyajikan pemutar |
+| novashow.live | `/player?id=<tmdbId>`; halaman pemutarnya menyebut tujuh penyedia lengkap dengan bentuk serialnya |
+| dympire.pages.dev | SPA beriklan berat; popunder-nya menutup tab peramban berulang kali, bundel JS-nya tidak memuat satu pun rute pemutar |
+| plutocine.pages.dev | sama; `js/app.js` hanya berisi pemanggil TMDB |
+
+Jadi yang dipasang pemutarnya LANGSUNG, bukan kulitnya — keputusan yang sama
+dengan cinesrc pada watchvanta (3n-bis). Enam kamar baru di `PROFIL`, masing
+masing terpisah: `player.cinezo.live`, `player.vidzee.wtf`, `vaplayer.ru`,
+`vsembed.su`, `holaflix.cc`, `novashow.live`. Dua yang berupa SITUS dapat jeda
+ketukan 9 detik dan ambang 45 detik, karena mengetuk situs induk menekan
+tombolnya sendiri dan ada satu lapisan jaringan tambahan.
+
+**Hasil uji 3 film per server di Galaxy A36:**
+
+| server | hasil | catatan |
+|---|---|---|
+| cinezo | **3/3** | satu-satunya penyedia baru yang juga memutar film Indonesia |
+| holaflix | **3/3** | memutar LEWAT `player.cinezo.live`, jadi bukan cadangan yang berdiri sendiri |
+| vidzee | 2/3 | Tumbal Proyek tidak ada di katalognya |
+| vsembed | 2/3 | frame dalamnya `stellarconductornexus.com` |
+| vaplayer | **0/3** | terpilih di ketiganya, tidak satu pun punya sumber |
+| novashow | **0/3** | `/player?id=` menjawab HTTP 200 dengan NOL bait |
+
+`vaplayer.ru` dan `novashow.live` karena itu masuk `HOST_MATI` — diturunkan ke
+belakang, bukan dibuang (3v).
+
+**Menguji lewat ANTARMUKA tidak bisa dipercaya, dan ini yang paling mahal
+dipelajari.** Tiga cara dicoba, ketiganya gagal dengan bentuk yang sama:
+server yang TIDAK PERNAH dimuat terlaporkan sebagai "tidak bekerja".
+
+- `uiautomator dump` **gagal diam-diam** selama video berjalan: ia menunggu
+  antarmuka diam, dan video yang berputar tidak pernah membuatnya diam.
+  Perintahnya menulis "ERROR: could not get idle state." lalu berkas XML LAMA
+  tetap ada, sehingga pembacaan berikutnya memulangkan layar basi. Terukur:
+  daftar chip terbaca `VIDCORE…CINEZO` sementara layarnya jelas menampilkan
+  `FRAMEXTV-2/3/4`.
+- **Ketukan pada koordinat tetap** melewatkan chip yang lebarnya berbeda-beda.
+  Terukur: sepanjang seluruh percobaan, `vaplayer` tidak pernah sekali pun
+  dimuat meski rutenya ada.
+- **Navigasi fokus (DPAD)** tidak selalu mendarat di deret yang benar: 13 dari
+  15 langkah memulangkan `None`.
+
+Yang akhirnya dipakai: **siaran `com.bytify.app.UJI_SERVER`** dengan extra
+`nama`, dipagari `BuildConfig.DEBUG`. Ia memilih server MENURUT NAMANYA dan
+mencatat `uji: pilih '<nama>' -> indeks N dari M`, sehingga pengujian tahu
+pasti apakah server itu ditawarkan untuk judul tersebut (`indeks -1` berarti
+memang tidak ada) dan tata letak tidak lagi ikut menentukan hasil.
+
+**Putusan uji diambil dari satu angka: `currentTime` yang maju.** Ukuran kotak
+dan opacity ikut dibaca untuk memisahkan "berjalan tetapi tak terlihat" dari
+"tidak berjalan". Dan tiap laporan membawa `host=` dokumennya: tanpa itu,
+laporan dari WebView server SEBELUMNYA terbaca sebagai bukti bahwa server yang
+baru dipilih berjalan — sapuan pertama memberi 8 dari 8 "JALAN", dan itu bohong.
+
+**Pilihan MANUAL mematikan perpindahan otomatis.** Penelusuran otomatis ada
+untuk saat pengguna belum menyatakan apa pun; begitu ia menekan sebuah chip, ia
+sudah menyatakannya. Sebelum ini, chip yang ditekan melaporkan host server LAIN
+karena watchdog sudah memindahkannya sebelum server itu sempat menempelkan
+sumbernya.
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

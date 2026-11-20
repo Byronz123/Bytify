@@ -1,12 +1,18 @@
 package com.bytify.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Message
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.util.Log
+import com.bytify.app.BuildConfig
+import androidx.core.content.ContextCompat
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -807,7 +813,11 @@ private const val GATE_BYPASS_JS = """
         '@' + Math.round(k.left) + ',' + Math.round(k.top) +
         ' pos=' + g.position + ' vis=' + g.visibility + ' op=' + g.opacity +
         ' tf=' + (g.transform === 'none' ? 'none' : 'ada') +
-        ' frame=' + (window.top === window ? 'utama' : 'anak'));
+        ' frame=' + (window.top === window ? 'utama' : 'anak') +
+        // Host dokumennya IKUT dilaporkan: tanpa itu laporan dari WebView
+        // server sebelumnya — yang belum sempat dibuang — terbaca sebagai
+        // bukti bahwa server yang BARU dipilih berjalan.
+        ' host=' + location.hostname);
     } catch (e) {}
   }
   setInterval(pantauBerkala, 3000);
@@ -1105,6 +1115,22 @@ private val PROFIL: List<Pair<String, ProfilServer>> = listOf(
     // justru membuka menu subtitlenya di atas video yang sedang berjalan.
     "anikai.org" to ProfilServer(jedaKetukMs = 0L),
     "megaplay.buzz" to ProfilServer(jedaKetukMs = 0L),
+    // --- Enam penyedia baru, masing-masing kamarnya sendiri ---
+    //
+    // Dipisah sejak awal, bukan setelah bertabrakan: perilaku yang cocok untuk
+    // satu penyedia hampir selalu merusak penyedia lain, dan itu sudah terbukti
+    // berkali-kali di sesi-sesi sebelumnya.
+    "player.cinezo.live" to ProfilServer(jedaKetukMs = 6000L),
+    "player.vidzee.wtf" to ProfilServer(jedaKetukMs = 6000L),
+    "vaplayer.ru" to ProfilServer(jedaKetukMs = 6000L),
+    "vsembed.su" to ProfilServer(jedaKetukMs = 6000L),
+    // Dua yang berupa SITUS, bukan pemutar: mereka memuat pemutar lain di
+    // dalam iframe, jadi jangan diketuk cepat-cepat (ketukan di situs induk
+    // menekan tombolnya sendiri, bukan tombol pemutarnya) dan beri waktu lebih
+    // karena ada satu lapisan jaringan tambahan.
+    "holaflix.cc" to ProfilServer(jedaKetukMs = 9000L, ambangMs = 45_000L),
+    "novashow.live" to ProfilServer(jedaKetukMs = 9000L, ambangMs = 45_000L),
+
     // Pemutar yang baru membuat sumbernya SETELAH ada gestur.
     "vidlink.pro" to ProfilServer(jedaKetukMs = 6000L),
     "cinesrc.st" to ProfilServer(jedaKetukMs = 6000L),
@@ -1133,6 +1159,25 @@ private fun profilUntuk(url: String?): ProfilServer {
 
 /** Host yang dokumennya TIDAK boleh diambil ulang lewat OkHttp (lihat di bawah). */
 private val TANPA_PROKSI = listOf("veloflix.my.id")
+
+/**
+ * Host yang pada pengukuran terakhir tidak memulangkan apa pun.
+ *
+ * Dipakai hanya untuk URUTAN, bukan untuk membuang. Jalankan sapuan uji lagi
+ * sebelum menambah atau mengurangi daftar ini — satu judul yang gagal bukan
+ * bukti penyedianya mati (3v).
+ */
+private val HOST_MATI = listOf(
+    "framextv",
+    "vidsrc.cc",
+    // 0/3 film di Galaxy A36: terpilih (dibuktikan siaran uji) tetapi tidak
+    // satu pun memulangkan sumber.
+    "vaplayer.ru",
+    // 0/3 film, dan sebabnya terlihat dari luar: `novashow.live/player?id=`
+    // menjawab HTTP 200 dengan NOL bait. Halamannya kosong, jadi tidak ada
+    // yang bisa dimuat.
+    "novashow.live",
+)
 
 // CATATAN STATUS veloflix (belum selesai, jangan dianggap beres):
 // aliran dan tata letaknya sudah benar — `BYTIFY_JALAN t=710.59 maju=3.00
@@ -1388,7 +1433,19 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                 cermin += pilihan
             }
         }
-        pertama + cermin
+        // Host yang TERUKUR mati diturunkan ke paling belakang.
+        //
+        // Diuji di Galaxy A36 pada tiga judul: `framextv` tidak pernah
+        // memulangkan satu bait pun (backend 429) dan `vidsrc.cc` origin-nya
+        // 522. Keduanya tetap DIPASANG — origin bisa pulih, dan membuangnya
+        // berarti harus menerbitkan APK baru ketika itu terjadi — tetapi
+        // menaruhnya di depan berarti penonton menunggu ambang penuh untuk
+        // sesuatu yang sudah diketahui tidak menjawab.
+        val semua = pertama + cermin
+        val (mati, hidup) = semua.partition { pilihan ->
+            HOST_MATI.any { pilihan.url.contains(it, ignoreCase = true) }
+        }
+        hidup + mati
     }
 
     // Indeks server yang sedang dicoba. Berpindah server juga cara situs sumber
@@ -1441,6 +1498,48 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
     var videoBerjalan by remember(playKey) { mutableStateOf(false) }
     /** Alamat server yang laporan gagalnya SUDAH dipakai memajukan server. */
     var sudahDilewati by remember(playKey) { mutableStateOf<String?>(null) }
+    /** Pengguna memilih servernya sendiri; jangan dipindahkan otomatis. */
+    var pilihanManual by remember(playKey, videoUrl) { mutableStateOf(false) }
+
+    // --- Jalur UJI: memilih server lewat siaran, hanya di build debug ---
+    //
+    // Menguji belasan server lewat antarmuka ternyata tidak bisa dipercaya:
+    // `uiautomator dump` gagal diam-diam selama video berjalan (ia butuh
+    // antarmuka yang diam) sehingga daftar chip terbaca basi, ketukan pada
+    // koordinat tetap melewatkan chip yang lebarnya berbeda, dan navigasi
+    // fokus tidak selalu mendarat di deret yang benar. Akibatnya server yang
+    // TIDAK PERNAH dimuat terlaporkan sebagai "tidak bekerja" — kesimpulan
+    // yang salah dan berbahaya.
+    //
+    // Siaran ini memilih server MENURUT NAMANYA, jadi pengujian tidak lagi
+    // bergantung pada tata letak. Dipagari `BuildConfig.DEBUG`: di build
+    // rilis receiver-nya tidak pernah didaftarkan sama sekali.
+    val konteksUji = LocalContext.current
+    if (BuildConfig.DEBUG) {
+        DisposableEffect(kandidat) {
+            val penerima = object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, intent: Intent?) {
+                    val nama = intent?.getStringExtra("nama").orEmpty().lowercase()
+                    if (nama.isBlank()) return
+                    val urutan = kandidat.indexOfFirst {
+                        it.nama.lowercase().contains(nama) || it.url.lowercase().contains(nama)
+                    }
+                    Log.i(EMBED_TAG, "uji: pilih '$nama' -> indeks $urutan dari ${kandidat.size}")
+                    if (urutan >= 0) {
+                        serverHabis = false
+                        pilihanManual = true
+                        indeksServer = urutan
+                    }
+                }
+            }
+            val saringan = IntentFilter("com.bytify.app.UJI_SERVER")
+            ContextCompat.registerReceiver(
+                konteksUji, penerima, saringan, ContextCompat.RECEIVER_EXPORTED,
+            )
+            onDispose { runCatching { konteksUji.unregisterReceiver(penerima) } }
+        }
+    }
+
     DisposableEffect(videoBerjalan) {
         if (videoBerjalan) ModeFloating.daftarkanVideo() else ModeFloating.lepaskanVideo()
         onDispose { ModeFloating.lepaskanVideo() }
@@ -1469,7 +1568,9 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
         // keduanya tiba sebelum recomposition, sehingga penjaga
         // `dariUrl == activeEmbedUrl` saja masih meloloskan keduanya dan dua
         // server terlompati dalam 11 ms.
-        if ((dariUrl == null || dariUrl == activeEmbedUrl) && dariUrl != sudahDilewati) {
+        if (pilihanManual) {
+            Log.i(EMBED_TAG, "server dipilih manual; perpindahan otomatis dilewati")
+        } else if ((dariUrl == null || dariUrl == activeEmbedUrl) && dariUrl != sudahDilewati) {
             sudahDilewati = dariUrl
             if (indeksServer + 1 < kandidat.size) indeksServer += 1 else serverHabis = true
         }
@@ -1793,6 +1894,18 @@ private fun MovieVideoContent(movie: Movie, episode: EpisodeDto?, onSelectEpisod
                         onClick = {
                             if (!aktif) {
                                 serverHabis = false
+                                // Pilihan MANUAL mematikan perpindahan otomatis.
+                                //
+                                // Penelusuran otomatis ada untuk menemukan server
+                                // yang bekerja ketika pengguna belum menyatakan
+                                // apa pun. Begitu ia menekan sebuah chip, ia
+                                // sudah menyatakannya — dan memindahkannya
+                                // diam-diam ke server lain membuat pilihannya
+                                // tidak berarti. Terukur saat menguji: chip yang
+                                // ditekan melaporkan host server LAIN, karena
+                                // watchdog sudah memindahkannya sebelum server
+                                // itu sempat menempelkan sumbernya.
+                                pilihanManual = true
                                 indeksServer = urutan
                             }
                         },

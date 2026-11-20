@@ -113,9 +113,65 @@ private val RUTE = listOf(
         { id, musim, episode -> "https://cinesrc.st/embed/tv/$id?s=$musim&e=$episode" },
     ),
     RuteEmbed(
+        // TERBUKTI berputar di peramban untuk `tmdb 27205`: `readyState 4`,
+        // sumber `blob:`, judulnya benar ("Inception 2010", 2:28:08).
+        //
+        // Ditemukan dari holaflix.cc, yang menyematnya sebagai server
+        // pertamanya. Yang dipasang pemutarnya langsung, bukan holaflix —
+        // sama alasannya dengan cinesrc pada watchvanta (3n-bis).
+        //
+        // Bentuk serialnya `?s=&e=`. Tanpa Referer ia menjawab 403, dan
+        // pemutar kita memang mengirim alamatnya sendiri sebagai Referer di
+        // jalur langsung, jadi syarat itu terpenuhi.
+        "cinezo",
+        { id -> "https://player.cinezo.live/embed/movie/$id" },
+        { id, musim, episode -> "https://player.cinezo.live/embed/tv/$id?s=$musim&e=$episode" },
+    ),
+    RuteEmbed(
+        // TERBUKTI berputar di peramban untuk `tmdb 27205`: `readyState 4`,
+        // `currentTime` 13,4 detik, "Inception 0:13 / 2:28:08".
+        // Ditemukan dari daftar penyedia novashow.live.
+        "vidzee",
+        { id -> "https://player.vidzee.wtf/embed/movie/$id" },
+        { id, musim, episode -> "https://player.vidzee.wtf/embed/tv/$id/$musim/$episode" },
+    ),
+    RuteEmbed(
         "vidlink",
         { id -> "https://vidlink.pro/movie/$id" },
         { id, musim, episode -> "https://vidlink.pro/tv/$id/$musim/$episode" },
+    ),
+    RuteEmbed(
+        // Halaman pemutarnya mengenali judulnya ("Inception 2010") dan
+        // menyajikan kontrol penuh, tetapi elemen videonya tidak terjangkau
+        // dari luar di peramban — jadi pembuktiannya DISERAHKAN ke perangkat,
+        // tempat skrip kita berjalan di dalam tiap frame.
+        "vaplayer",
+        { id -> "https://vaplayer.ru/embed/movie/$id" },
+        { id, musim, episode -> "https://vaplayer.ru/embed/tv/$id/$musim/$episode" },
+    ),
+    RuteEmbed(
+        // Satu keluarga dengan vidsrc.me, yang mengalihkan diri ke sini.
+        // Ditemukan dari mode Embed reelix.ac.
+        "vsembed",
+        { id -> "https://vsembed.su/embed/movie/$id" },
+        { id, musim, episode -> "https://vsembed.su/embed/tv/$id/$musim/$episode" },
+    ),
+    RuteEmbed(
+        // Situs, bukan pemutar — tetapi alamatnya BERKUNCI TMDB id dan ia
+        // membawa 14 penyedianya sendiri, jadi ia berguna justru ketika
+        // penyedia tunggal kita habis.
+        "holaflix",
+        { id -> "https://holaflix.cc/play/movie/$id" },
+        { id, musim, episode -> "https://holaflix.cc/play/tv/$id?s=$musim&e=$episode" },
+    ),
+    RuteEmbed(
+        // Sama seperti holaflix: situs berkunci TMDB id dengan tujuh penyedia
+        // di dalamnya. Daftar penyedianya yang menuntun ke cinezo dan vidzee.
+        "novashow",
+        { id -> "https://novashow.live/player?id=$id" },
+        { id, musim, episode ->
+            "https://novashow.live/player?id=$id&type=tv&season=$musim&episode=$episode"
+        },
     ),
     RuteEmbed(
         // Memutar `tmdb 1469930` di Galaxy A36, gagal untuk `tmdb 27205`.

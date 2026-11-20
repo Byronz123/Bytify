@@ -148,6 +148,60 @@ function rapikanSubdl(baris) {
   };
 }
 
+/**
+ * Tuan rumah yang TIDAK boleh diambil berkasnya.
+ *
+ * `tautan()` mengunduh URL yang dipulangkan penyedia apa adanya, jadi tanpa
+ * penjagaan ini sebuah URL yang menunjuk ke dalam jaringan server sendiri
+ * akan ikut diambil dan isinya dikirim ke pemanggil (SSRF).
+ */
+function tuanRumahLokal(host) {
+  const h = String(host || '').toLowerCase();
+  return h === 'localhost'
+    || h.endsWith('.localhost')
+    || h.endsWith('.internal')
+    || h === '::1'
+    || h === '[::1]'
+    || /^127\./.test(h)
+    || /^10\./.test(h)
+    || /^192\.168\./.test(h)
+    || /^169\.254\./.test(h)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+}
+
+/** Bentuk baris Wyzie -> bentuk yang sama dengan hasil OpenSubtitles. */
+function rapikanWyzie(baris) {
+  // Bentuk jawaban Wyzie DITERIMA LONGGAR dengan sengaja: dokumentasinya
+  // menyebut `language`, `display`, `format`, dan `source`, sementara versi
+  // lamanya memakai `url`/`download`. Menolak baris hanya karena nama
+  // fieldnya berbeda berarti sumber ini diam tanpa alasan, padahal kuncinya
+  // sudah dibayar.
+  const mentah = String(baris?.url || baris?.download || baris?.link || '');
+  if (!/^https:\/\//i.test(mentah)) return null;
+  let host = '';
+  try {
+    host = new URL(mentah).hostname;
+  } catch (e) {
+    return null;
+  }
+  if (tuanRumahLokal(host)) return null;
+  const kode = String(baris.language || baris.lang || '').toLowerCase();
+  const lang = kode.startsWith('indo') ? 'id' : kode.slice(0, 2);
+  if (!lang) return null;
+  return {
+    // Awalan `wyzie:` memilih jalur unduh di `tautan()`, sama seperti `subdl:`.
+    fileId: `wyzie:${mentah}`,
+    fileName: baris.display || baris.release || null,
+    lang,
+    release: baris.release || null,
+    downloads: 0,
+    hearingImpaired: baris.isHearingImpaired === true || baris.hi === true,
+    fps: null,
+    uploadedAt: null,
+    sumber: 'wyzie',
+  };
+}
+
 export function createSubtitleService(options = {}, log = console) {
   const {
     apiKey = '',
@@ -224,6 +278,52 @@ export function createSubtitleService(options = {}, log = console) {
       return baris.map(rapikanSubdl).filter((x) => x && x.lang);
     }
     return [];
+  }
+
+  // --- Wyzie: sumber KETIGA, satu kunci untuk 13 penyedia ---
+  //
+  // Diukur sebelum dipasang: OpenSubtitles + SubDL hanya memberi subtitle
+  // Indonesia untuk 2 dari 48 film Indonesia yang diuji, dan SubDL sendiri 3
+  // dari 60. Wyzie mengagregasi 13 penyedia sekaligus, jadi ia bisa menutup
+  // sisanya -- TETAPI itu belum terbukti, karena endpoint-nya menjawab 503
+  // "Down for maintenance" saat ini ditulis. Karena itu ia dipasang persis
+  // seperti SubDL: tanpa kunci seluruh jalurnya DIAM, dan hasilnya sama
+  // seperti sebelum ia ada.
+  //
+  // Ia dipanggil PALING AKHIR dan hanya untuk bahasa yang masih kosong, jadi
+  // satu judul paling banyak memakai SATU permintaan kuotanya -- dan tidak
+  // satu pun kalau OpenSubtitles sudah lengkap.
+  const wyzieKey = String(options.wyzieKey || '').trim();
+  const wyzieBase = String(options.wyzieBase || 'https://sub.wyzie.ru').replace(/\/+$/, '');
+
+  async function cariWyzie({ id, bahasa, jenis, season, episode }) {
+    if (!wyzieKey || !bahasa.length) return [];
+    const q = new URLSearchParams({
+      id: String(id),
+      key: wyzieKey,
+      language: bahasa.join(','),
+      format: 'srt',
+    });
+    if (jenis === 'episode') {
+      if (Number.isFinite(Number(season))) q.set('season', String(Number(season)));
+      if (Number.isFinite(Number(episode))) q.set('episode', String(Number(episode)));
+    }
+    let resp;
+    try {
+      resp = await fetchImpl(`${wyzieBase}/search?${q.toString()}`, {
+        headers: { Accept: 'application/json' },
+      });
+    } catch (e) {
+      log.warn?.(`[subtitles] wyzie tmdb=${id} tidak terjangkau: ${e?.message || e}`);
+      return [];
+    }
+    if (!resp.ok) {
+      log.warn?.(`[subtitles] wyzie tmdb=${id} gagal: HTTP ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json().catch(() => null);
+    const baris = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+    return baris.map(rapikanWyzie).filter((x) => x && x.lang);
   }
 
   function alasanTidakSiap() {
@@ -374,14 +474,30 @@ export function createSubtitleService(options = {}, log = console) {
       }
     }
 
+    // Wyzie menutup sisanya, dan urutannya sama alasannya: yang punya sinyal
+    // kualitas terukur didahulukan, yang hanya menambal menyusul.
+    const masihKurang = bahasa.filter((k) => !terpilih.some((x) => x.lang === k));
+    let dariWyzie = [];
+    if (masihKurang.length) {
+      dariWyzie = await cariWyzie({ id, bahasa: masihKurang, jenis, season, episode });
+      for (const kode of masihKurang) {
+        const cocok = dariWyzie.find((x) => x.lang === kode);
+        if (cocok) terpilih.push(cocok);
+      }
+    }
+
+    const sumberPakai = ['OpenSubtitles.com'];
+    if (dariSubdl.length) sumberPakai.push('SubDL.com');
+    if (dariWyzie.length) sumberPakai.push('Wyzie Subs');
+    const akhir = sumberPakai[sumberPakai.length - 1];
     const nilai = {
       tmdbId: id,
       languages: bahasa,
       subtitles: terpilih,
-      totalFound: semua.length + dariSubdl.length,
-      attribution: dariSubdl.length
-        ? 'Subtitle dari OpenSubtitles.com dan SubDL.com'
-        : 'Subtitle dari OpenSubtitles.com',
+      totalFound: semua.length + dariSubdl.length + dariWyzie.length,
+      attribution: sumberPakai.length > 1
+        ? `Subtitle dari ${sumberPakai.slice(0, -1).join(', ')} dan ${akhir}`
+        : `Subtitle dari ${akhir}`,
     };
     singgahan.set(kunci, { pada: Date.now(), nilai });
     return { status: 200, ...nilai };
@@ -422,6 +538,40 @@ export function createSubtitleService(options = {}, log = console) {
         contentType: 'application/x-subrip; charset=utf-8',
         fileName: jalur.split('/').pop() || null,
         attribution: 'Subtitle dari SubDL.com',
+      };
+    }
+
+    // Berkas Wyzie dikirim sebagai ISI juga: yang dipulangkannya URL langsung
+    // ke berkas penyedia, dan menjawabnya dengan 302 berarti APK mengambil
+    // dari tuan rumah yang tidak kita kenal.
+    if (teksId.startsWith('wyzie:')) {
+      if (!wyzieKey) {
+        return { status: 503, error: 'WYZIE_API_KEY belum diatur di environment.' };
+      }
+      const alamat = teksId.slice('wyzie:'.length);
+      let host = '';
+      try {
+        host = new URL(alamat).hostname;
+      } catch (e) {
+        host = '';
+      }
+      if (!/^https:\/\//i.test(alamat) || !host || tuanRumahLokal(host)) {
+        return { status: 400, error: 'Alamat berkas Wyzie tidak sah.' };
+      }
+      const resp = await fetchImpl(alamat, { headers: { Accept: 'text/plain,*/*' } });
+      if (!resp.ok) {
+        return { status: 502, error: `Wyzie menjawab HTTP ${resp.status}.` };
+      }
+      const teks = await resp.text();
+      if (!teks || !teks.trim()) {
+        return { status: 502, error: 'Berkas Wyzie kosong.' };
+      }
+      return {
+        status: 200,
+        body: teks,
+        contentType: 'application/x-subrip; charset=utf-8',
+        fileName: alamat.split('/').pop()?.split('?')[0] || null,
+        attribution: 'Subtitle dari Wyzie Subs',
       };
     }
 
@@ -482,6 +632,8 @@ export function subtitleServiceDariEnv(env = ENV_BAWAAN, log = console) {
     subdlKeys: [env.SUBDL_API_KEY, env.SUBDL_API_KEY_1, env.SUBDL_API_KEY_2]
       .map((k) => (k || '').trim())
       .filter(Boolean),
+    wyzieKey: (env.WYZIE_API_KEY || '').trim(),
+    wyzieBase: (env.WYZIE_BASE_URL || 'https://sub.wyzie.ru').trim(),
     subdlBase: (env.SUBDL_BASE_URL || 'https://api.subdl.com').trim(),
     subdlUnduh: (env.SUBDL_DOWNLOAD_URL || 'https://dl.subdl.com').trim(),
   }, log);

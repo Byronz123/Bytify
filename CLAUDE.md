@@ -1173,6 +1173,48 @@ gagal dengan `FileNotFoundError` dan rantainya putus di situ. Sumbernya
 sekarang daftar kerja keluaran `tmdb_match.py` sendiri (film, serial, anime,
 anime-film), jadi rantainya tertutup.
 
+### 3ag. Wyzie sebagai sumber subtitle KETIGA, dan penghematan kuotanya
+
+Diukur lebih dulu, sebelum ada kode: OpenSubtitles + SubDL hanya memberi
+subtitle Indonesia untuk **2 dari 48** film Indonesia yang diuji lewat API
+produksi, dan SubDL sendiri **3 dari 60** saat ditanya langsung. Wyzie
+mengagregasi 13 penyedia dengan satu kunci, jadi ia kandidat untuk menutup
+sisanya.
+
+**Belum terbukti, dan karena itu dipasang DIAM.** Endpoint `sub.wyzie.ru/search`
+menjawab `503 "Down for maintenance"` saat ini ditulis, jadi tidak ada satu pun
+angka nyata tentang cakupannya. Tanpa `WYZIE_API_KEY` seluruh jalurnya tidak
+ditembak sama sekali dan hasilnya identik dengan sebelum ia ada — dijaga uji
+sendiri, sama seperti SubDL (3x).
+
+Empat sifat yang mengikat bentuknya:
+
+- **Dipanggil PALING AKHIR dan hanya untuk bahasa yang masih kosong.** Urutan
+  OpenSubtitles -> SubDL -> Wyzie mengikuti alasan yang sama dengan 3x: hanya
+  OpenSubtitles punya `download_count` sebagai sinyal kualitas. Akibat
+  sampingannya penting untuk kuota: satu judul memakai paling banyak SATU
+  permintaan Wyzie, dan nol kalau OpenSubtitles sudah lengkap.
+- **Bentuk jawabannya diterima LONGGAR.** Dokumentasinya menyebut `language`,
+  `display`, `format`, `source`; versi lamanya memakai `url`/`download`.
+  Menolak baris hanya karena nama fieldnya berbeda berarti sumber berbayar
+  yang diam tanpa alasan.
+- **Berkasnya dikirim sebagai ISI, bukan 302.** Wyzie memulangkan URL langsung
+  ke berkas penyedia; menjawabnya dengan pengalihan berarti APK mengambil dari
+  tuan rumah yang tidak kita kenal. `fileId` berawalan `wyzie:` yang memilih
+  jalur itu, pola yang sama dengan `subdl:`.
+- **`tuanRumahLokal()` menutup SSRF.** `tautan()` mengambil URL yang diberikan
+  penyedia apa adanya, jadi alamat ke `127.0.0.1`, `10.x`, `192.168.x`,
+  `172.16-31.x`, `169.254.x`, `localhost`, `.internal` dan skema non-HTTPS
+  ditolak 400 tanpa satu pun permintaan. Dijaga uji.
+
+**Singgahan tepi dinaikkan 600 detik -> 86.400 detik**, dan ini yang membuat
+kuota berkuota-tetap bertahan. Daftar subtitle sebuah film praktis tidak
+berubah dari jam ke jam, sementara satu judul populer dibuka puluhan kali
+sehari. Dengan 600 detik tiap judul menembak upstream belasan kali per hari;
+dengan sehari, sekali. `/api/subtitles` memang tidak memakan kuota UNDUH
+OpenSubtitles (3g), jadi yang dihemat kuota pencarian SubDL (1.000/hari) dan
+Wyzie (2 juta sekali beli).
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar

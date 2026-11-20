@@ -360,3 +360,97 @@ test('kunci SubDL dipotong dari fileId', async () => {
     assert.doesNotMatch(teks, /rahasia-jangan-bocor/);
     assert.equal(hasil.subtitles[0].fileId, 'subdl:/subtitle/3678808-8595795.zip');
 });
+
+// --- Wyzie: sumber KETIGA ---
+//
+// Sifat yang dijaga sama persis dengan SubDL: ia hanya MENAMBAL, tanpa kunci
+// ia DIAM, dan berkasnya dikirim sebagai isi (bukan 302) supaya APK tidak
+// pernah mengambil dari tuan rumah yang tidak kita kenal dengan header kita.
+test('Wyzie menambal bahasa yang tidak didapat OpenSubtitles maupun SubDL', async () => {
+    const dipanggil = [];
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true, wyzieKey: 'kunci-wyzie',
+        fetchImpl: async (url) => {
+            const alamat = String(url);
+            dipanggil.push(alamat);
+            if (alamat.includes('sub.wyzie.ru')) {
+                return new Response(JSON.stringify([{
+                    language: 'id',
+                    display: 'Indonesian',
+                    format: 'srt',
+                    url: 'https://cdn.contoh-wyzie.test/sub/9.srt',
+                }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+            return new Response(JSON.stringify({
+                data: [{
+                    attributes: {
+                        language: 'en', release: 'EN rilis', download_count: 4,
+                        files: [{ file_id: 7, file_name: 'en.srt' }],
+                    },
+                }],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        },
+    }, { warn() {}, error() {} });
+
+    const hasil = await layanan.cari({ tmdbId: 1525059, languages: 'id,en' });
+    assert.equal(hasil.status, 200);
+    assert.deepEqual(hasil.subtitles.map((x) => x.lang).sort(), ['en', 'id']);
+    const indo = hasil.subtitles.find((x) => x.lang === 'id');
+    assert.equal(indo.fileId, 'wyzie:https://cdn.contoh-wyzie.test/sub/9.srt');
+    assert.equal(indo.sumber, 'wyzie');
+    assert.match(hasil.attribution, /Wyzie Subs/);
+    // Hanya bahasa yang KURANG yang ditanyakan ke Wyzie; `en` sudah didapat.
+    const kueri = new URL(dipanggil.find((u) => u.includes('sub.wyzie.ru')));
+    assert.equal(kueri.searchParams.get('language'), 'id');
+    assert.equal(kueri.searchParams.get('id'), '1525059');
+});
+
+test('tanpa WYZIE_API_KEY jalurnya diam sepenuhnya', async () => {
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true,
+        fetchImpl: async (url) => {
+            assert.ok(!String(url).includes('wyzie'), 'Wyzie tidak boleh ditembak tanpa kunci');
+            return new Response(JSON.stringify({ data: [] }), {
+                status: 200, headers: { 'Content-Type': 'application/json' },
+            });
+        },
+    }, { warn() {}, error() {} });
+    const hasil = await layanan.cari({ tmdbId: 2, languages: 'id,en' });
+    assert.equal(hasil.status, 200);
+    assert.equal(hasil.attribution, 'Subtitle dari OpenSubtitles.com');
+});
+
+test('berkas Wyzie dikirim sebagai isi SRT, bukan pengalihan', async () => {
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true, wyzieKey: 'kunci-wyzie',
+        fetchImpl: async () => new Response('1\n00:00:01,000 --> 00:00:02,000\nHalo\n', {
+            status: 200, headers: { 'Content-Type': 'text/plain' },
+        }),
+    }, { warn() {}, error() {} });
+    const hasil = await layanan.tautan({ fileId: 'wyzie:https://cdn.contoh-wyzie.test/a.srt' });
+    assert.equal(hasil.status, 200);
+    assert.match(hasil.body, /Halo/);
+    assert.equal(hasil.contentType, 'application/x-subrip; charset=utf-8');
+    assert.equal(hasil.link, undefined);
+});
+
+// URL yang menunjuk ke dalam jaringan server sendiri TIDAK boleh diambil:
+// tanpa penjagaan ini sebuah penyedia bisa membuat server kita membaca
+// alamat internalnya sendiri lalu mengirimkan isinya (SSRF).
+test('alamat Wyzie ke tuan rumah lokal ditolak', async () => {
+    const layanan = createSubtitleService({
+        apiKey: 'kunci', termsAccepted: true, wyzieKey: 'kunci-wyzie',
+        fetchImpl: async () => {
+            throw new Error('tidak boleh ada permintaan sama sekali');
+        },
+    }, { warn() {}, error() {} });
+    for (const jahat of [
+        'wyzie:https://127.0.0.1/rahasia.srt',
+        'wyzie:https://192.168.1.5/rahasia.srt',
+        'wyzie:https://localhost/rahasia.srt',
+        'wyzie:http://cdn.contoh-wyzie.test/a.srt',
+    ]) {
+        const hasil = await layanan.tautan({ fileId: jahat });
+        assert.equal(hasil.status, 400, jahat);
+    }
+});

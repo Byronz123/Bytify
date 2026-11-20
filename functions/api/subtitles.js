@@ -17,9 +17,15 @@ function jsonResponse(body, status = 200) {
         status,
         headers: {
             'Access-Control-Allow-Origin': '*',
-            // Judul yang sama sering dibuka berulang; biarkan tepi menyimpannya
-            // sebentar supaya kuota upstream tidak terbuang.
-            'Cache-Control': status === 200 ? 'public, max-age=600' : 'no-store',
+            // Judul yang sama sering dibuka berulang, dan daftar subtitle
+            // sebuah film praktis tidak berubah dari jam ke jam. Dengan 600
+            // detik, sepuluh penonton film yang sama dalam sehari berarti
+            // belasan permintaan ke upstream; dengan sehari, cukup satu.
+            // Itu yang membuat kuota berkuota-tetap (SubDL 1.000/hari, Wyzie
+            // 2 juta sekali beli) bertahan lama. Endpoint ini TIDAK memakan
+            // kuota unduh OpenSubtitles, jadi yang dihemat kuota pencarian
+            // kedua sumber lain.
+            'Cache-Control': status === 200 ? 'public, max-age=86400' : 'no-store',
         },
     });
 }

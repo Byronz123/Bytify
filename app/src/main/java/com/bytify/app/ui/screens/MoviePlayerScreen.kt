@@ -1331,6 +1331,19 @@ private fun profilUntuk(url: String?): ProfilServer {
 }
 
 /** Host yang dokumennya TIDAK boleh diambil ulang lewat OkHttp (lihat di bawah). */
+private fun titikSisip(badan: String): Int {
+    var i = 0
+    while (i < badan.length) {
+        val kepala = badan.indexOf("</head>", i, ignoreCase = true)
+        if (kepala < 0) return -1
+        val skrip = badan.indexOf("<script", i, ignoreCase = true)
+        if (skrip < 0 || kepala < skrip) return kepala
+        val tutup = badan.indexOf("</script", skrip, ignoreCase = true)
+        i = if (tutup < 0) badan.length else tutup + 8
+    }
+    return -1
+}
+
 private val TANPA_PROKSI = listOf("veloflix.my.id")
 
 /**
@@ -1343,9 +1356,6 @@ private val TANPA_PROKSI = listOf("veloflix.my.id")
 private val HOST_MATI = listOf(
     "framextv",
     "vidsrc.cc",
-    // 0/3 film di Galaxy A36: terpilih (dibuktikan siaran uji) tetapi tidak
-    // satu pun memulangkan sumber.
-    "vaplayer.ru",
     // 0/3 film, dan sebabnya terlihat dari luar: `novashow.live/player?id=`
     // menjawab HTTP 200 dengan NOL bait. Halamannya kosong, jadi tidak ada
     // yang bisa dimuat.
@@ -2624,7 +2634,22 @@ private fun EmbedVideoStage(
                                             return@runCatching null
                                         }
                                         val skrip = skripUntuk(profilUntuk(alamat))
-                                        val titik = badan.indexOf("</head>", ignoreCase = true)
+                                        // `</head>` yang BENAR, bukan yang kebetulan
+                                        // berada di dalam literal string JavaScript.
+                                        //
+                                        // Terukur pada vaplayer.ru: dokumennya dibuka
+                                        // oleh skrip anti-sandbox yang memanggil
+                                        // document.write('<!DOCTYPE html><html><head>
+                                        // </head><body ...'). Menyisipkan di `</head>`
+                                        // PERTAMA berarti menyisipkan ke tengah string
+                                        // itu, dan Chromium menjawab "Uncaught
+                                        // SyntaxError: Invalid or unexpected token" —
+                                        // yang mati bukan hanya skrip halamannya,
+                                        // melainkan GATE_BYPASS_JS juga. Akibatnya
+                                        // server tidak pernah melaporkan apa pun dan
+                                        // dibuang oleh ambang waktu, padahal pemutarnya
+                                        // sendiri tidak pernah diberi kesempatan.
+                                        val titik = titikSisip(badan)
                                         val disisipi = if (titik >= 0) {
                                             badan.substring(0, titik) + skrip + badan.substring(titik)
                                         } else {

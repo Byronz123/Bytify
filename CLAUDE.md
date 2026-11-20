@@ -1045,6 +1045,36 @@ Terukur di Galaxy A36 pada Interstellar: veloflix memberi halaman blokir, dua
 kali "Try Again" gagal, lalu pemutar berpindah dan cinesrc memutarnya —
 `t=11.10 rs=4 buf=114.7 kotak=384x216@0,0`.
 
+### 3ab. Titik sisip skrip: `</head>` PERTAMA bisa berada di dalam string JS
+
+vaplayer tampil hitam dan tidak pernah melaporkan apa pun — bukan `BYTIFY_SIAP`,
+bukan `BYTIFY_DIAM`, bukan satu baris `BYTIFY_JALAN`. Yang terbaca di logcat
+hanya `Uncaught SyntaxError: Invalid or unexpected token`, dan itu muncul pada
+DUA dokumen sekaligus: `vaplayer.ru/embed/movie/<id>` dan frame dalamnya
+`nextgencloudfabric.com`.
+
+Sebabnya dokumen vaplayer dibuka oleh skrip anti-sandbox yang memanggil
+`document.write('<!DOCTYPE html><html><head></head><body ...')`. Jadi `</head>`
+PERTAMA di berkas itu berada di dalam literal string JavaScript, dan
+`badan.indexOf("</head>")` menyisipkan GATE_BYPASS_JS tepat ke tengah string
+itu. Yang mati bukan hanya skrip halamannya — skrip kita ikut mati, sehingga
+server tidak pernah bisa melaporkan kemajuan dan dibuang oleh ambang waktu
+padahal pemutarnya tidak pernah diberi kesempatan.
+
+`titikSisip()` karena itu melewati seluruh wilayah `<script>…</script>` lebih
+dulu dan memakai `</head>` pertama yang berada DI LUAR skrip. Perbaikannya
+berlaku untuk semua penyedia, bukan hanya vaplayer.
+
+Terukur di Galaxy A36 sesudahnya, dua jalan berturut-turut: Inception
+`t=545.13 rs=4 buf=605.6 kotak=384x216@0,0 op=1` dan Interstellar
+`t=257.33 rs=4 buf=320.3`, keduanya di `nextgencloudfabric.com`, nol
+"pindah server", dan gambarnya tampil di layar. `vaplayer.ru` karena itu
+DIKELUARKAN dari `HOST_MATI` — catatan "0/3" yang lama mengukur penyedianya,
+padahal yang rusak penyisipan kita sendiri.
+
+Tumbal Proyek (2026) tetap tidak ada di vaplayer — itu katalog penyedianya,
+bukan pemutar kita (3v).
+
 ### 3o. Trailer diputar DI DALAM aplikasi, dan butuh origin yang sah
 
 Tombol trailer dulu memanggil `Intent.ACTION_VIEW` sehingga pengguna terlempar
